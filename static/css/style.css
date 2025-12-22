@@ -1771,6 +1771,93 @@ body {
     transform: none;
 }
 
+/* Profile Picture Edit */
+.profile-avatar-edit {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    margin: 0 auto var(--spacing-md);
+    border-radius: 50%;
+    background: var(--bg-input);
+    border: 3px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    overflow: hidden;
+}
+
+.profile-avatar-edit:hover {
+    border-color: var(--accent-primary);
+    transform: scale(1.05);
+}
+
+.profile-avatar-edit img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.avatar-upload-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: var(--transition-fast);
+    gap: 4px;
+}
+
+.profile-avatar-edit:hover .avatar-upload-overlay {
+    opacity: 1;
+}
+
+.avatar-upload-overlay svg {
+    width: 32px;
+    height: 32px;
+    color: white;
+}
+
+.avatar-upload-overlay span {
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.btn-upload-photo {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-upload-photo:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: rgba(255, 140, 0, 0.1);
+}
+
+.btn-upload-photo svg {
+    width: 16px;
+    height: 16px;
+}
+
 /* ========================================
    Responsive Styles
    ======================================== */

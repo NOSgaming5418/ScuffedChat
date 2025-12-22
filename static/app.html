@@ -332,6 +332,38 @@
             </div>
             <div class="modal-body">
                 <form id="profile-edit-form" style="width: 100%;">
+                    <!-- Profile Picture Section -->
+                    <div style="text-align: center; margin-bottom: var(--spacing-lg);">
+                        <div class="profile-avatar-edit" id="profile-avatar-edit">
+                            <span id="profile-avatar-preview"></span>
+                            <div class="avatar-upload-overlay">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                                    <circle cx="12" cy="13" r="4"/>
+                                </svg>
+                                <span>Change Photo</span>
+                            </div>
+                        </div>
+                        <input 
+                            type="file" 
+                            id="profile-picture-input" 
+                            accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" 
+                            style="display: none;"
+                        >
+                        <button type="button" class="btn-upload-photo" onclick="document.getElementById('profile-picture-input').click()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="17 8 12 3 7 8"/>
+                                <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            Upload Photo
+                        </button>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                            Max 5MB • PNG, JPG, GIF, WebP
+                        </p>
+                    </div>
+                    
+                    <!-- Username Section -->
                     <label for="edit-username-input" style="display: block; margin-bottom: 8px; font-weight: 500;">Username</label>
                     <input 
                         type="text" 

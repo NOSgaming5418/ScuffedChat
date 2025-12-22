@@ -103,7 +103,14 @@ async function initializeApp() {
 function updateUserProfile() {
     if (currentUserProfile) {
         document.getElementById('username').textContent = currentUserProfile.username;
-        document.getElementById('user-avatar').textContent = currentUserProfile.username.charAt(0).toUpperCase();
+        const avatarElement = document.getElementById('user-avatar');
+        
+        // Show profile picture if available, otherwise show initial
+        if (currentUserProfile.avatar) {
+            avatarElement.innerHTML = `<img src="${currentUserProfile.avatar}" alt="Profile" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+        } else {
+            avatarElement.textContent = currentUserProfile.username.charAt(0).toUpperCase();
+        }
     }
 }
 
@@ -1324,16 +1331,61 @@ function openProfileEdit() {
     const form = document.getElementById('profile-edit-form');
     const input = document.getElementById('edit-username-input');
     const error = document.getElementById('profile-edit-error');
+    const avatarPreview = document.getElementById('profile-avatar-preview');
+    const pictureInput = document.getElementById('profile-picture-input');
     
     modal.style.display = 'flex';
     input.value = currentUserProfile.username;
     error.style.display = 'none';
     
+    // Set current avatar
+    if (currentUserProfile.avatar) {
+        avatarPreview.innerHTML = `<img src="${currentUserProfile.avatar}" alt="Profile">`;
+    } else {
+        avatarPreview.textContent = currentUserProfile.username.charAt(0).toUpperCase();
+    }
+    
+    let selectedAvatar = null;
+    
+    // Handle profile picture selection
+    pictureInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Validate file size (5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            error.textContent = 'Image must be less than 5MB';
+            error.style.display = 'block';
+            return;
+        }
+        
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            error.textContent = 'Please select a valid image file';
+            error.style.display = 'block';
+            return;
+        }
+        
+        error.style.display = 'none';
+        
+        // Read and preview the image
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            selectedAvatar = event.target.result;
+            avatarPreview.innerHTML = `<img src="${selectedAvatar}" alt="Profile Preview">`;
+            showToast('Photo selected. Click Save to apply', 'success');
+        };
+        reader.readAsDataURL(file);
+    };
+    
     form.onsubmit = async (e) => {
         e.preventDefault();
         const username = input.value.trim();
         
-        if (username === currentUserProfile.username) {
+        const usernameChanged = username !== currentUserProfile.username;
+        const avatarChanged = selectedAvatar !== null;
+        
+        if (!usernameChanged && !avatarChanged) {
             modal.style.display = 'none';
             return;
         }
@@ -1355,19 +1407,65 @@ function openProfileEdit() {
             submitBtn.disabled = true;
             submitBtn.textContent = 'Saving...';
             
-            // Check if username exists
-            const { data: existing } = await supabaseClient
-                .from('profiles')
-                .select('id')
-                .eq('username', username)
-                .single();
+            // Check if username exists (only if changed)
+            if (usernameChanged) {
+                const { data: existing } = await supabaseClient
+                    .from('profiles')
+                    .select('id')
+                    .eq('username', username)
+                    .single();
+                
+                if (existing && existing.id !== currentUser.id) {
+                    error.textContent = 'Username already taken';
+                    error.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Save Changes';
+                    return;
+                }
+            }
             
-            if (existing && existing.id !== currentUser.id) {
-                error.textContent = 'Username already taken';
-                error.style.display = 'block';
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Save Changes';
-                return;
+            // Prepare update data
+            const updateData = {};
+            if (usernameChanged) {
+                updateData.username = username;
+            }
+            if (avatarChanged) {
+                updateData.avatar = selectedAvatar;
+            }
+            
+            // Update profile
+            const { error: updateError } = await supabaseClient
+                .from('profiles')
+                .update(updateData)
+                .eq('id', currentUser.id);
+            
+            if (updateError) throw updateError;
+            
+            // Update local profile
+            if (usernameChanged) {
+                currentUserProfile.username = username;
+            }
+            if (avatarChanged) {
+                currentUserProfile.avatar = selectedAvatar;
+            }
+            
+            updateUserProfile();
+            modal.style.display = 'none';
+            showToast('Profile updated successfully!', 'success');
+            
+            // Reload conversations to update display
+            loadConversations();
+            
+        } catch (err) {
+            console.error('Profile update error:', err);
+            error.textContent = 'Failed to update profile';
+            error.style.display = 'block';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Save Changes';
+        }
+    };
+}
             }
             
             // Update profile
