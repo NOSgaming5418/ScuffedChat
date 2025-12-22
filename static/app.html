@@ -85,10 +85,7 @@
                     </svg>
                     <input type="text" placeholder="Add friend by username..." id="add-friend-input">
                     <button class="btn-add" id="add-friend-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="5" x2="12" y2="19" />
-                            <line x1="5" y1="12" x2="19" y2="12" />
-                        </svg>
+                        <img src="/static/images/yellowplus.png" alt="Add friend">
                     </button>
                 </div>
 
@@ -196,6 +193,34 @@
 
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
+
+    <!-- Friend Request Detail Modal -->
+    <div class="modal-overlay" id="friend-request-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Friend Request</h3>
+                <button class="btn-close" onclick="closeFriendRequestModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-avatar">
+                    <span id="modal-avatar-text">?</span>
+                </div>
+                <div class="modal-info">
+                    <h2 id="modal-username">Username</h2>
+                    <p id="modal-status">Wants to be friends</p>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal-accept" id="modal-accept-btn">Accept</button>
+                <button class="btn-modal-decline" id="modal-decline-btn">Decline</button>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/js/supabase-config.js"></script>
     <script src="/static/js/app.js"></script>

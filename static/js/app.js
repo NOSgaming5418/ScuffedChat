@@ -505,21 +505,34 @@ function renderFriendRequests() {
     badge.style.display = 'flex';
     badge.textContent = friendRequests.length;
 
-    container.innerHTML = friendRequests.map(req => `
-        <div class="friend-item">
-            <div class="avatar">
-                <span>${req.from.username.charAt(0).toUpperCase()}</span>
+    container.innerHTML = friendRequests.map(req => {
+        const username = escapeHtml(req.from.username);
+        const initial = req.from.username.charAt(0).toUpperCase();
+        return `
+            <div class="friend-item" data-request-id="${req.id}" data-username="${username}" style="cursor: pointer;">
+                <div class="avatar">
+                    <span>${initial}</span>
+                </div>
+                <div class="friend-info">
+                    <span class="friend-name">${username}</span>
+                    <span class="friend-status">Wants to be friends</span>
+                </div>
+                <div class="friend-actions" onclick="event.stopPropagation();">
+                    <button class="btn-accept" onclick="acceptFriendRequest(${req.id})">Accept</button>
+                    <button class="btn-decline" onclick="declineFriendRequest(${req.id})">Decline</button>
+                </div>
             </div>
-            <div class="friend-info">
-                <span class="friend-name">${escapeHtml(req.from.username)}</span>
-                <span class="friend-status">Wants to be friends</span>
-            </div>
-            <div class="friend-actions">
-                <button class="btn-accept" onclick="acceptFriendRequest(${req.id})">Accept</button>
-                <button class="btn-decline" onclick="declineFriendRequest(${req.id})">Decline</button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
+
+    // Add click handlers
+    container.querySelectorAll('.friend-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const requestId = item.getAttribute('data-request-id');
+            const username = item.getAttribute('data-username');
+            showFriendRequestModal(requestId, username);
+        });
+    });
 }
 
 function renderMessages(messages) {
@@ -676,4 +689,34 @@ function showToast(message, type = 'success') {
         toast.style.animation = 'toastIn 0.3s ease-out reverse';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+function showFriendRequestModal(requestId, username) {
+    const modal = document.getElementById('friend-request-modal');
+    const avatarText = document.getElementById('modal-avatar-text');
+    const usernameEl = document.getElementById('modal-username');
+    const acceptBtn = document.getElementById('modal-accept-btn');
+    const declineBtn = document.getElementById('modal-decline-btn');
+
+    avatarText.textContent = username.charAt(0).toUpperCase();
+    usernameEl.textContent = username;
+
+    acceptBtn.onclick = () => {
+        acceptFriendRequest(requestId);
+        closeFriendRequestModal();
+    };
+
+    declineBtn.onclick = () => {
+        declineFriendRequest(requestId);
+        closeFriendRequestModal();
+    };
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeFriendRequestModal() {
+    const modal = document.getElementById('friend-request-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
 }
