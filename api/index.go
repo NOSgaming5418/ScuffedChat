@@ -3,6 +3,8 @@ package handler
 import (
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Handler is the serverless function entry point for Vercel
@@ -44,28 +46,31 @@ func serveFile(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func getContentType(path string) string {
-	if len(path) < 4 {
-		return "text/plain"
-	}
-
-	ext := path[len(path)-4:]
+	ext := strings.ToLower(filepath.Ext(path))
+	
 	switch ext {
-	case ".html", "html":
+	case ".html":
 		return "text/html"
-	case ".css", ".css":
+	case ".css":
 		return "text/css"
-	case ".js", "e.js":
+	case ".js":
 		return "application/javascript"
-	case ".json", "json":
+	case ".json":
 		return "application/json"
-	case ".png", ".png":
+	case ".png":
 		return "image/png"
-	case ".jpg", ".jpg", "jpeg":
+	case ".jpg", ".jpeg":
 		return "image/jpeg"
-	case ".gif", ".gif":
+	case ".gif":
 		return "image/gif"
-	case ".svg", ".svg":
+	case ".svg":
 		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".woff", ".woff2":
+		return "font/woff2"
+	case ".ttf":
+		return "font/ttf"
 	default:
 		return "text/plain"
 	}
