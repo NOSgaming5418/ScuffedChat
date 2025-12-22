@@ -656,6 +656,44 @@ async function declineFriendRequest(requestId) {
     }
 }
 
+async function removeFriend(friendId, friendUsername) {
+    if (!confirm(`Remove ${friendUsername} from your friends?`)) {
+        return;
+    }
+
+    try {
+        // Find the friendship record (could be either direction)
+        const { data: friendships, error: fetchError } = await supabaseClient
+            .from('friends')
+            .select('id')
+            .eq('status', 'accepted')
+            .or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`)
+            .or(`user_id.eq.${friendId},friend_id.eq.${friendId}`);
+
+        if (fetchError) throw fetchError;
+
+        if (!friendships || friendships.length === 0) {
+            showToast('Friend not found', 'error');
+            return;
+        }
+
+        // Delete the friendship
+        const { error } = await supabaseClient
+            .from('friends')
+            .delete()
+            .eq('id', friendships[0].id);
+
+        if (error) throw error;
+
+        showToast('Friend removed', 'success');
+        await loadFriends();
+
+    } catch (error) {
+        console.error('Error removing friend:', error);
+        showToast('Failed to remove friend', 'error');
+    }
+}
+
 // Render Functions
 
 function renderConversations() {
@@ -731,6 +769,7 @@ function renderFriends() {
             </div>
             <div class="friend-actions">
                 <button class="btn-message" onclick="openChat('${friend.id}')">Message</button>
+                <button class="btn-decline" onclick="removeFriend('${friend.id}', '${escapeHtml(friend.username)}')">Remove</button>
             </div>
         </div>
     `).join('');
