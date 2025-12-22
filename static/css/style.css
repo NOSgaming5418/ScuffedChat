@@ -490,6 +490,13 @@ body {
     font-size: 1.1rem;
     color: var(--bg-dark);
     flex-shrink: 0;
+    overflow: hidden;
+}
+
+.avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .avatar.large {
@@ -1112,6 +1119,9 @@ body {
 .message {
     max-width: 70%;
     animation: messageIn 0.3s ease-out;
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-xs);
 }
 
 @keyframes messageIn {
@@ -1127,10 +1137,34 @@ body {
 
 .message.sent {
     align-self: flex-end;
+    flex-direction: row-reverse;
 }
 
 .message.received {
     align-self: flex-start;
+    flex-direction: row;
+}
+
+.message-avatar {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 50%;
+    background: var(--bg-input);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.message-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .message-bubble {

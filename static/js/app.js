@@ -686,7 +686,7 @@ function renderConversations() {
                 data-user-id="${conv.user.id}"
                 onclick="openChat('${conv.user.id}')">
             <div class="avatar">
-                <span>${conv.user.username.charAt(0).toUpperCase()}</span>
+                ${conv.user.avatar ? `<img src="${escapeHtml(conv.user.avatar)}" alt="Avatar">` : `<span>${conv.user.username.charAt(0).toUpperCase()}</span>`}
             </div>
             <div class="conversation-info">
                 <div class="conversation-name">
@@ -727,7 +727,7 @@ function renderFriends() {
     container.innerHTML = friends.map(friend => `
         <div class="friend-item">
             <div class="avatar">
-                <span>${friend.username.charAt(0).toUpperCase()}</span>
+                ${friend.avatar ? `<img src="${escapeHtml(friend.avatar)}" alt="Avatar">` : `<span>${friend.username.charAt(0).toUpperCase()}</span>`}
             </div>
             <div class="friend-info">
                 <span class="friend-name">${escapeHtml(friend.username)}</span>
