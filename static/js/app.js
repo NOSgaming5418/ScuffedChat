@@ -450,6 +450,9 @@ async function sendMessage() {
 
     if (!content || !currentChat) return;
 
+    // Clear input immediately for better UX
+    input.value = '';
+
     try {
         const messageData = {
             sender_id: currentUser.id,
@@ -463,6 +466,15 @@ async function sendMessage() {
             messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         }
 
+        // Optimistic update - show message immediately with temporary ID
+        const tempMessage = { ...messageData, id: 'temp-' + Date.now() };
+        appendMessage(tempMessage, false);
+
+        // Scroll to bottom
+        const container = document.getElementById('messages-container');
+        container.scrollTop = container.scrollHeight;
+
+        // Send to database
         const { data: message, error } = await supabaseClient
             .from('messages')
             .insert(messageData)
@@ -471,16 +483,17 @@ async function sendMessage() {
 
         if (error) throw error;
 
-        appendMessage(message, false);
-        input.value = '';
-
-        // Scroll to bottom
-        const container = document.getElementById('messages-container');
-        container.scrollTop = container.scrollHeight;
+        // Replace temporary message with real one (update the ID)
+        const tempElement = document.querySelector(`[data-message-id="${tempMessage.id}"]`);
+        if (tempElement) {
+            tempElement.setAttribute('data-message-id', message.id);
+        }
 
     } catch (error) {
         console.error('Failed to send message:', error);
         showToast('Failed to send message', 'error');
+        // Restore the message to input on failure
+        input.value = content;
     }
 }
 
@@ -530,6 +543,14 @@ async function handleImageUpload(e) {
                     messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
                 }
 
+                // Optimistic update - show media immediately
+                const tempMessage = { ...messageData, id: 'temp-' + Date.now() };
+                appendMessage(tempMessage, false);
+
+                // Scroll to bottom
+                const container = document.getElementById('messages-container');
+                container.scrollTop = container.scrollHeight;
+
                 const { data: message, error } = await supabaseClient
                     .from('messages')
                     .insert(messageData)
@@ -541,12 +562,13 @@ async function handleImageUpload(e) {
                     throw error;
                 }
 
-                appendMessage(message, false);
-                showToast(isVideo ? 'Video sent!' : 'Image sent!', 'success');
+                // Replace temporary message with real one
+                const tempElement = document.querySelector(`[data-message-id="${tempMessage.id}"]`);
+                if (tempElement) {
+                    tempElement.setAttribute('data-message-id', message.id);
+                }
 
-                // Scroll to bottom
-                const container = document.getElementById('messages-container');
-                container.scrollTop = container.scrollHeight;
+                showToast(isVideo ? 'Video sent!' : 'Image sent!', 'success');
 
             } catch (error) {
                 console.error('Failed to send image:', error);
