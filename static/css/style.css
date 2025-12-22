@@ -717,7 +717,7 @@ body {
     gap: var(--spacing-sm);
 }
 
-.conversation-name span {
+.conversation-username {
     font-weight: 600;
     font-size: 0.95rem;
     white-space: nowrap;
@@ -742,7 +742,7 @@ body {
 
 .conversation-preview span {
     font-size: 0.85rem;
-    color: var(--text-muted) !important;
+    color: var(--text-primary) !important;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

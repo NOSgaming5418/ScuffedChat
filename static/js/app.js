@@ -548,7 +548,7 @@ function renderConversations() {
             </div>
             <div class="conversation-info">
                 <div class="conversation-name">
-                    <span>${escapeHtml(conv.user.username)}</span>
+                    <span class="conversation-username">${escapeHtml(conv.user.username)}</span>
                     ${conv.last_message ? `
                         <span class="conversation-time">${formatTime(conv.last_message.created_at)}</span>
                     ` : ''}
@@ -565,7 +565,7 @@ function renderConversations() {
 function filterConversations(query) {
     const items = document.querySelectorAll('.conversation-item');
     items.forEach(item => {
-        const username = item.querySelector('.conversation-name span').textContent.toLowerCase();
+        const username = item.querySelector('.conversation-username').textContent.toLowerCase();
         item.style.display = username.includes(query) ? '' : 'none';
     });
 }
