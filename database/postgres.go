@@ -56,7 +56,7 @@ func CreateUser(username, email, password string) (*models.User, error) {
 	}
 
 	query := `
-		INSERT INTO scuffedsnap.profiles (username, email, password_hash, created_at) 
+		INSERT INTO profiles (username, email, password_hash, created_at) 
 		VALUES ($1, $2, $3, NOW())
 		RETURNING id, created_at, avatar
 	`
@@ -78,7 +78,7 @@ func GetUserByUsername(username string) (*models.User, error) {
 	user := &models.User{}
 	query := `
 		SELECT id, username, email, password_hash, avatar, created_at 
-		FROM scuffedsnap.profiles 
+		FROM profiles 
 		WHERE username = $1
 	`
 
@@ -102,7 +102,7 @@ func GetUserByEmail(email string) (*models.User, error) {
 	user := &models.User{}
 	query := `
 		SELECT id, username, email, password_hash, avatar, created_at 
-		FROM scuffedsnap.profiles 
+		FROM profiles 
 		WHERE email = $1
 	`
 
@@ -126,7 +126,7 @@ func GetUserByID(id string) (*models.User, error) {
 	user := &models.User{}
 	query := `
 		SELECT id, username, email, avatar, created_at 
-		FROM scuffedsnap.profiles 
+		FROM profiles 
 		WHERE id = $1
 	`
 
@@ -147,7 +147,7 @@ func GetUserByID(id string) (*models.User, error) {
 // UpdateUser updates a user's information
 func UpdateUser(id string, username, email, avatar string) error {
 	query := `
-		UPDATE scuffedsnap.profiles 
+		UPDATE profiles 
 		SET username = $1, email = $2, avatar = $3 
 		WHERE id = $4
 	`
@@ -161,7 +161,7 @@ func UpdateUser(id string, username, email, avatar string) error {
 // CreateSession creates a new session for a user
 func CreateSession(sessionID, userID string, expiresAt time.Time) error {
 	query := `
-		INSERT INTO scuffedsnap.sessions (id, user_id, created_at, expires_at) 
+		INSERT INTO sessions (id, user_id, created_at, expires_at) 
 		VALUES ($1, $2, NOW(), $3)
 	`
 
@@ -174,7 +174,7 @@ func GetSession(sessionID string) (*models.Session, error) {
 	session := &models.Session{}
 	query := `
 		SELECT id, user_id, created_at, expires_at 
-		FROM scuffedsnap.sessions 
+		FROM sessions 
 		WHERE id = $1 AND expires_at > NOW()
 	`
 
@@ -193,7 +193,7 @@ func GetSession(sessionID string) (*models.Session, error) {
 
 // DeleteSession removes a session
 func DeleteSession(sessionID string) error {
-	query := `DELETE FROM scuffedsnap.sessions WHERE id = $1`
+	query := `DELETE FROM sessions WHERE id = $1`
 	_, err := DB.Exec(query, sessionID)
 	return err
 }
@@ -216,7 +216,7 @@ func CreateMessage(senderID, receiverID, content, msgType string, expiresAt *tim
 	}
 
 	query := `
-		INSERT INTO scuffedsnap.messages (sender_id, receiver_id, content, type, expires_at, created_at) 
+		INSERT INTO messages (sender_id, receiver_id, content, type, expires_at, created_at) 
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		RETURNING id, created_at
 	`
@@ -288,7 +288,7 @@ func GetConversations(userID string, limit int) ([]map[string]interface{}, error
 				END as partner_id,
 				id, sender_id, receiver_id, content, type, 
 				read_at, created_at
-			FROM scuffedsnap.messages
+			FROM messages
 			WHERE sender_id = $1 OR receiver_id = $1
 			ORDER BY 
 				CASE 
@@ -351,7 +351,7 @@ func GetConversations(userID string, limit int) ([]map[string]interface{}, error
 // MarkMessageAsRead marks a message as read
 func MarkMessageAsRead(messageID, userID string) error {
 	query := `
-		UPDATE scuffedsnap.messages 
+		UPDATE messages 
 		SET read_at = NOW() 
 		WHERE id = $1 AND receiver_id = $2 AND read_at IS NULL
 	`
@@ -363,7 +363,7 @@ func MarkMessageAsRead(messageID, userID string) error {
 // UpdateMessage updates a message's content
 func UpdateMessage(messageID, senderID, content string) error {
 	query := `
-		UPDATE scuffedsnap.messages 
+		UPDATE messages 
 		SET content = $1, edited = true, updated_at = NOW() 
 		WHERE id = $2 AND sender_id = $3
 	`
@@ -374,7 +374,7 @@ func UpdateMessage(messageID, senderID, content string) error {
 
 // DeleteMessage deletes a message
 func DeleteMessage(messageID, userID string) error {
-	query := `DELETE FROM scuffedsnap.messages WHERE id = $1 AND sender_id = $2`
+	query := `DELETE FROM messages WHERE id = $1 AND sender_id = $2`
 	_, err := DB.Exec(query, messageID, userID)
 	return err
 }
@@ -390,7 +390,7 @@ func CleanupExpiredMessages() error {
 // CreateFriendRequest creates a new friend request
 func CreateFriendRequest(userID, friendID string) error {
 	query := `
-		INSERT INTO scuffedsnap.friends (user_id, friend_id, status, created_at) 
+		INSERT INTO friends (user_id, friend_id, status, created_at) 
 		VALUES ($1, $2, 'pending', NOW())
 	`
 
@@ -403,7 +403,7 @@ func GetFriends(userID string) ([]models.Friend, error) {
 	query := `
 		SELECT f.id, f.user_id, f.friend_id, f.status, f.created_at,
 		       p.username, p.avatar
-		FROM scuffedsnap.friends f
+		FROM friends f
 		JOIN profiles p ON p.id = f.friend_id
 		WHERE f.user_id = $1 AND f.status = 'accepted'
 		ORDER BY p.username
@@ -441,7 +441,7 @@ func GetFriendRequests(userID string) ([]models.Friend, error) {
 	query := `
 		SELECT f.id, f.user_id, f.friend_id, f.status, f.created_at,
 		       p.username, p.avatar
-		FROM scuffedsnap.friends f
+		FROM friends f
 		JOIN profiles p ON p.id = f.user_id
 		WHERE f.friend_id = $1 AND f.status = 'pending'
 		ORDER BY f.created_at DESC
@@ -477,7 +477,7 @@ func GetFriendRequests(userID string) ([]models.Friend, error) {
 // UpdateFriendRequest updates a friend request status
 func UpdateFriendRequest(requestID, userID, status string) error {
 	query := `
-		UPDATE scuffedsnap.friends 
+		UPDATE friends 
 		SET status = $1 
 		WHERE id = $2 AND friend_id = $3
 	`
@@ -489,7 +489,7 @@ func UpdateFriendRequest(requestID, userID, status string) error {
 // DeleteFriend removes a friendship
 func DeleteFriend(userID, friendID string) error {
 	query := `
-		DELETE FROM scuffedsnap.friends 
+		DELETE FROM friends 
 		WHERE (user_id = $1 AND friend_id = $2) 
 		   OR (user_id = $2 AND friend_id = $1)
 	`
@@ -502,11 +502,11 @@ func DeleteFriend(userID, friendID string) error {
 func SearchUsers(currentUserID, searchQuery string, limit int) ([]models.User, error) {
 	query := `
 		SELECT p.id, p.username, p.avatar
-		FROM scuffedsnap.profiles p
+		FROM profiles p
 		WHERE p.id != $1
 		  AND p.username ILIKE $2
 		  AND NOT EXISTS (
-			SELECT 1 FROM scuffedsnap.friends f 
+			SELECT 1 FROM friends f 
 			WHERE (f.user_id = $1 AND f.friend_id = p.id)
 			   OR (f.user_id = p.id AND f.friend_id = $1)
 		  )
