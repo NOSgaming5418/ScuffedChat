@@ -19,7 +19,7 @@ if (window.supabaseClient) {
 async function initializeApp() {
     // Check authentication
     try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await window.supabaseClient.auth.getSession();
         if (!session) {
             window.location.href = '/';
             return;
@@ -27,7 +27,7 @@ async function initializeApp() {
         currentUser = session.user;
 
         // Get user profile
-        const { data: profile } = await supabaseClient
+        const { data: profile } = await window.supabaseClient
             .from('profiles')
             .select('*')
             .eq('id', currentUser.id)
@@ -35,20 +35,28 @@ async function initializeApp() {
 
         if (profile) {
             currentUserProfile = profile;
+            // Check if username needs to be set (for Google sign-in users)
+            if (!profile.username || profile.username.includes('@') || profile.username === '') {
+                showUsernameSetupModal();
+                return; // Don't load app until username is set
+            }
         } else {
-            // Create profile if doesn't exist
-            const username = currentUser.user_metadata?.username || currentUser.email.split('@')[0];
-            const { data: newProfile } = await supabaseClient
+            // Create profile if doesn't exist - trigger username setup
+            const tempUsername = currentUser.email.split('@')[0];
+            const { data: newProfile } = await window.supabaseClient
                 .from('profiles')
                 .insert({
                     id: currentUser.id,
-                    username: username,
+                    username: tempUsername,
+                    email: currentUser.email,
                     avatar: '',
                     created_at: new Date().toISOString()
                 })
                 .select()
                 .single();
             currentUserProfile = newProfile;
+            showUsernameSetupModal();
+            return; // Don't load app until username is set
         }
 
         updateUserProfile();
@@ -75,13 +83,20 @@ async function initializeApp() {
 function updateUserProfile() {
     if (currentUserProfile) {
         document.getElementById('username').textContent = currentUserProfile.username;
-        document.getElementById('user-avatar').textContent = currentUserProfile.username.charAt(0).toUpperCase();
+        
+        // Update avatar display
+        const avatarEl = document.getElementById('user-avatar');
+        if (currentUserProfile.avatar && currentUserProfile.avatar.trim() !== '') {
+            avatarEl.innerHTML = `<img src="${currentUserProfile.avatar}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+        } else {
+            avatarEl.textContent = currentUserProfile.username.charAt(0).toUpperCase();
+        }
     }
 }
 
 function setupRealtimeSubscription() {
     // Subscribe to new messages
-    messageSubscription = supabaseClient
+    messageSubscription = window.supabaseClient
         .channel('messages')
         .on('postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -150,7 +165,7 @@ function setupRealtimeSubscription() {
         .subscribe();
 
     // Subscribe to friend requests
-    supabaseClient
+    window.supabaseClient
         .channel('friends')
         .on('postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'friends', filter: `friend_id=eq.${currentUser.id}` },
@@ -163,10 +178,15 @@ function setupRealtimeSubscription() {
 }
 
 function setupEventListeners() {
+    // Profile click to edit
+    document.getElementById('user-profile').addEventListener('click', () => {
+        openProfileEditModal();
+    });
+    
     // Logout
     document.getElementById('logout-btn').addEventListener('click', async () => {
         try {
-            await supabaseClient.auth.signOut();
+            await window.supabaseClient.auth.signOut();
             window.location.href = '/';
         } catch (error) {
             console.error('Logout failed:', error);
@@ -242,7 +262,7 @@ function setupEventListeners() {
 async function loadConversations() {
     try {
         // Get messages where user is sender or receiver
-        const { data: messages, error } = await supabaseClient
+        const { data: messages, error } = await window.supabaseClient
             .from('messages')
             .select('*, sender:profiles!messages_sender_id_fkey(*), receiver:profiles!messages_receiver_id_fkey(*)')
             .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
@@ -280,7 +300,7 @@ async function loadConversations() {
 
 async function loadFriends() {
     try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await window.supabaseClient
             .from('friends')
             .select('*, friend:profiles!friends_friend_id_fkey(*), user:profiles!friends_user_id_fkey(*)')
             .or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`)
@@ -301,7 +321,7 @@ async function loadFriends() {
 
 async function loadFriendRequests() {
     try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await window.supabaseClient
             .from('friends')
             .select('*, user:profiles!friends_user_id_fkey(*)')
             .eq('friend_id', currentUser.id)
@@ -324,7 +344,7 @@ async function loadFriendRequests() {
 
 async function loadMessages(partnerId) {
     try {
-        const { data: messages, error } = await supabaseClient
+        const { data: messages, error } = await window.supabaseClient
             .from('messages')
             .select('*, sender:profiles!messages_sender_id_fkey(*)')
             .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${currentUser.id})`)
@@ -335,7 +355,7 @@ async function loadMessages(partnerId) {
         renderMessages(messages || []);
 
         // Mark messages as read
-        await supabaseClient
+        await window.supabaseClient
             .from('messages')
             .update({ read_at: new Date().toISOString() })
             .eq('sender_id', partnerId)
@@ -366,7 +386,7 @@ async function sendMessage() {
             messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         }
 
-        const { data: message, error } = await supabaseClient
+        const { data: message, error } = await window.supabaseClient
             .from('messages')
             .insert(messageData)
             .select()
@@ -430,7 +450,7 @@ async function handleImageUpload(e) {
                     messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
                 }
 
-                const { data: message, error } = await supabaseClient
+                const { data: message, error } = await window.supabaseClient
                     .from('messages')
                     .insert(messageData)
                     .select()
@@ -476,7 +496,7 @@ async function addFriend() {
 
     try {
         // Find user by username
-        const { data: user, error: findError } = await supabaseClient
+        const { data: user, error: findError } = await window.supabaseClient
             .from('profiles')
             .select('*')
             .eq('username', username)
@@ -493,7 +513,7 @@ async function addFriend() {
         }
 
         // Check if already friends or pending
-        const { data: existing } = await supabaseClient
+        const { data: existing } = await window.supabaseClient
             .from('friends')
             .select('*')
             .or(`and(user_id.eq.${currentUser.id},friend_id.eq.${user.id}),and(user_id.eq.${user.id},friend_id.eq.${currentUser.id})`)
@@ -505,7 +525,7 @@ async function addFriend() {
         }
 
         // Create friend request
-        const { error: insertError } = await supabaseClient
+        const { error: insertError } = await window.supabaseClient
             .from('friends')
             .insert({
                 user_id: currentUser.id,
@@ -527,7 +547,7 @@ async function addFriend() {
 
 async function acceptFriendRequest(requestId) {
     try {
-        const { error } = await supabaseClient
+        const { error } = await window.supabaseClient
             .from('friends')
             .update({ status: 'accepted' })
             .eq('id', requestId);
@@ -544,7 +564,7 @@ async function acceptFriendRequest(requestId) {
 
 async function declineFriendRequest(requestId) {
     try {
-        const { error } = await supabaseClient
+        const { error } = await window.supabaseClient
             .from('friends')
             .delete()
             .eq('id', requestId);
@@ -580,7 +600,10 @@ function renderConversations() {
                 data-user-id="${conv.user.id}"
                 onclick="openChat('${conv.user.id}')">
             <div class="avatar">
-                <span>${conv.user.username.charAt(0).toUpperCase()}</span>
+                ${conv.user.avatar ? 
+                    `<img src="${conv.user.avatar}" alt="${escapeHtml(conv.user.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
+                    `<span>${conv.user.username.charAt(0).toUpperCase()}</span>`
+                }
             </div>
             <div class="conversation-info">
                 <div class="conversation-name">
@@ -621,7 +644,10 @@ function renderFriends() {
     container.innerHTML = friends.map(friend => `
         <div class="friend-item">
             <div class="avatar">
-                <span>${friend.username.charAt(0).toUpperCase()}</span>
+                ${friend.avatar ? 
+                    `<img src="${friend.avatar}" alt="${escapeHtml(friend.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
+                    `<span>${friend.username.charAt(0).toUpperCase()}</span>`
+                }
             </div>
             <div class="friend-info">
                 <span class="friend-name">${escapeHtml(friend.username)}</span>
@@ -655,7 +681,10 @@ function renderFriendRequests() {
         return `
             <div class="friend-item" data-request-id="${req.id}" data-username="${username}" style="cursor: pointer;">
                 <div class="avatar">
-                    <span>${initial}</span>
+                    ${req.from.avatar ? 
+                        `<img src="${req.from.avatar}" alt="${username}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
+                        `<span>${initial}</span>`
+                    }
                 </div>
                 <div class="friend-info">
                     <span class="friend-name">${username}</span>
@@ -761,7 +790,7 @@ window.openChat = async function (partnerId) {
 
     if (!user) {
         // Try to fetch from supabase
-        const { data } = await supabaseClient
+        const { data } = await window.supabaseClient
             .from('profiles')
             .select('*')
             .eq('id', partnerId)
@@ -782,7 +811,12 @@ window.openChat = async function (partnerId) {
     document.getElementById('sidebar').classList.add('hidden'); // Mobile
 
     // Update chat header
-    document.getElementById('chat-avatar').textContent = user.username.charAt(0).toUpperCase();
+    const chatAvatar = document.getElementById('chat-avatar');
+    if (user.avatar) {
+        chatAvatar.innerHTML = `<img src="${user.avatar}" alt="${user.username}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+    } else {
+        chatAvatar.textContent = user.username.charAt(0).toUpperCase();
+    }
     document.getElementById('chat-username').textContent = user.username;
     document.getElementById('chat-status').textContent = 'Online';
 
@@ -944,7 +978,7 @@ async function editMessage(messageId) {
         }
         
         // Update in database
-        const { error } = await supabaseClient
+        const { error } = await window.supabaseClient
             .from('messages')
             .update({ 
                 content: newContent.trim(),
@@ -987,7 +1021,7 @@ async function editMessage(messageId) {
 async function deleteMessage(messageId) {
     try {
         // Delete from database - only if you're the sender
-        const { error } = await supabaseClient
+        const { error } = await window.supabaseClient
             .from('messages')
             .delete()
             .eq('id', messageId)
@@ -1037,3 +1071,271 @@ function closeImageViewer() {
 
 window.openImageViewer = openImageViewer;
 window.closeImageViewer = closeImageViewer;
+
+// ========================================
+// Username Setup Modal (for Google Sign-In)
+// ========================================
+
+function showUsernameSetupModal() {
+    const modal = document.getElementById('username-setup-modal');
+    const input = document.getElementById('setup-username');
+    const errorDiv = document.getElementById('username-error');
+    
+    // Pre-fill with current username if exists
+    if (currentUserProfile && currentUserProfile.username) {
+        input.value = currentUserProfile.username.replace('@', '');
+    }
+    
+    modal.style.display = 'flex';
+    errorDiv.style.display = 'none';
+    
+    // Setup submit handler
+    const confirmBtn = document.getElementById('confirm-username-btn');
+    confirmBtn.onclick = async () => {
+        const username = input.value.trim();
+        
+        // Validate username
+        if (username.length < 3 || username.length > 20) {
+            errorDiv.textContent = 'Username must be 3-20 characters';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        
+        if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+            errorDiv.textContent = 'Username can only contain letters, numbers, and underscores';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Saving...';
+        
+        try {
+            // Check if username is taken
+            const { data: existing } = await window.supabaseClient
+                .from('profiles')
+                .select('id')
+                .eq('username', username)
+                .neq('id', currentUser.id)
+                .single();
+            
+            if (existing) {
+                errorDiv.textContent = 'Username is already taken';
+                errorDiv.style.display = 'block';
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Continue';
+                return;
+            }
+            
+            // Update profile
+            const { error } = await window.supabaseClient
+                .from('profiles')
+                .update({ username: username })
+                .eq('id', currentUser.id);
+            
+            if (error) throw error;
+            
+            // Update local profile
+            currentUserProfile.username = username;
+            updateUserProfile();
+            
+            // Close modal and load app
+            modal.style.display = 'none';
+            
+            // Now load the app data
+            await Promise.all([
+                loadConversations(),
+                loadFriends(),
+                loadFriendRequests()
+            ]);
+            
+            setupRealtimeSubscription();
+            setupEventListeners();
+            
+        } catch (error) {
+            console.error('Failed to set username:', error);
+            errorDiv.textContent = 'Failed to save username. Please try again.';
+            errorDiv.style.display = 'block';
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Continue';
+        }
+    };
+}
+
+// ========================================
+// Profile Edit Modal
+// ========================================
+
+function openProfileEditModal() {
+    const modal = document.getElementById('profile-edit-modal');
+    const input = document.getElementById('edit-username');
+    const errorDiv = document.getElementById('profile-error');
+    const avatarPreview = document.getElementById('avatar-preview-img');
+    const avatarText = document.getElementById('avatar-preview-text');
+    
+    // Pre-fill with current data
+    input.value = currentUserProfile.username;
+    
+    // Show current avatar
+    if (currentUserProfile.avatar && currentUserProfile.avatar.trim() !== '') {
+        avatarPreview.src = currentUserProfile.avatar;
+        avatarPreview.style.display = 'block';
+        avatarText.style.display = 'none';
+    } else {
+        avatarPreview.style.display = 'none';
+        avatarText.style.display = 'flex';
+        avatarText.textContent = currentUserProfile.username.charAt(0).toUpperCase();
+    }
+    
+    modal.style.display = 'flex';
+    errorDiv.style.display = 'none';
+}
+
+function closeProfileEditModal() {
+    const modal = document.getElementById('profile-edit-modal');
+    modal.style.display = 'none';
+    // Reset file input
+    document.getElementById('avatar-upload').value = '';
+}
+
+window.closeProfileEditModal = closeProfileEditModal;
+window.openProfileEditModal = openProfileEditModal;
+
+// Handle avatar file selection
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('avatar-upload');
+    if (fileInput) {
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            // Check file size (5MB max)
+            if (file.size > 5 * 1024 * 1024) {
+                const errorDiv = document.getElementById('profile-error');
+                errorDiv.textContent = 'Image must be less than 5MB';
+                errorDiv.style.display = 'block';
+                fileInput.value = '';
+                return;
+            }
+            
+            // Check file type
+            if (!file.type.startsWith('image/')) {
+                const errorDiv = document.getElementById('profile-error');
+                errorDiv.textContent = 'Please select an image file';
+                errorDiv.style.display = 'block';
+                fileInput.value = '';
+                return;
+            }
+            
+            // Preview the image
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const avatarPreview = document.getElementById('avatar-preview-img');
+                const avatarText = document.getElementById('avatar-preview-text');
+                avatarPreview.src = e.target.result;
+                avatarPreview.style.display = 'block';
+                avatarText.style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    // Save profile button
+    const saveBtn = document.getElementById('save-profile-btn');
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            const username = document.getElementById('edit-username').value.trim();
+            const fileInput = document.getElementById('avatar-upload');
+            const errorDiv = document.getElementById('profile-error');
+            
+            // Validate username
+            if (username.length < 3 || username.length > 20) {
+                errorDiv.textContent = 'Username must be 3-20 characters';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            errorDiv.style.display = 'none';
+            
+            try {
+                let avatarUrl = currentUserProfile.avatar;
+                
+                // Upload avatar if file selected
+                if (fileInput.files.length > 0) {
+                    const file = fileInput.files[0];
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${Date.now()}.${fileExt}`;
+                    const filePath = `${currentUser.id}/${fileName}`; // Upload to user's folder
+                    
+                    // Upload to Supabase Storage
+                    const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
+                        .from('avatars')
+                        .upload(filePath, file, {
+                            cacheControl: '3600',
+                            upsert: true
+                        });
+                    
+                    if (uploadError) throw uploadError;
+                    
+                    // Get public URL
+                    const { data: urlData } = window.supabaseClient.storage
+                        .from('avatars')
+                        .getPublicUrl(filePath);
+                    
+                    avatarUrl = urlData.publicUrl;
+                }
+                
+                // Check if username changed and is taken
+                if (username !== currentUserProfile.username) {
+                    const { data: existing } = await window.supabaseClient
+                        .from('profiles')
+                        .select('id')
+                        .eq('username', username)
+                        .neq('id', currentUser.id)
+                        .single();
+                    
+                    if (existing) {
+                        errorDiv.textContent = 'Username is already taken';
+                        errorDiv.style.display = 'block';
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = 'Save Changes';
+                        return;
+                    }
+                }
+                
+                // Update profile
+                const { error } = await window.supabaseClient
+                    .from('profiles')
+                    .update({ 
+                        username: username,
+                        avatar: avatarUrl
+                    })
+                    .eq('id', currentUser.id);
+                
+                if (error) throw error;
+                
+                // Update local profile
+                currentUserProfile.username = username;
+                currentUserProfile.avatar = avatarUrl;
+                updateUserProfile();
+                
+                // Refresh conversations to update display names
+                await loadConversations();
+                
+                closeProfileEditModal();
+                showToast('Profile updated successfully', 'success');
+                
+            } catch (error) {
+                console.error('Failed to update profile:', error);
+                errorDiv.textContent = 'Failed to save changes. Please try again.';
+                errorDiv.style.display = 'block';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        };
+    }
+});
+

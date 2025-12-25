@@ -1,0 +1,61 @@
+╔════════════════════════════════════════════════════════════════╗
+║           🛡️  SCUFFEDSNAP ADMIN QUICK START  🛡️                ║
+╚════════════════════════════════════════════════════════════════╝
+
+📋 TO MAKE YOURSELF ADMIN:
+
+1. Open Supabase SQL Editor:
+   https://supabase.com/dashboard/project/ulwlwrtedihujhpbuzvu/sql
+
+2. Run this SQL command (copy from make_me_admin.sql):
+   
+   UPDATE profiles 
+   SET is_admin = true 
+   WHERE id IN (
+       SELECT id FROM auth.users 
+       WHERE email = 'fazeboiz3125@gmail.com'
+   );
+
+3. Access Admin Dashboard:
+   http://localhost:8080/admin
+
+═══════════════════════════════════════════════════════════════
+
+✅ ADMIN DASHBOARD FEATURES:
+
+• View statistics (users, messages, chats, friend requests)
+• See all registered users
+• Delete user accounts
+• Search users by username
+• Admin badge indicator
+• Real-time data from Supabase
+
+═══════════════════════════════════════════════════════════════
+
+📁 FILES UPDATED:
+
+✓ static/admin.html         - Admin dashboard (fully functional)
+✓ grant_admin.sql           - Updated with email/username support
+✓ make_me_admin.sql         - Quick setup script (NEW)
+✓ handlers/admin.go         - Backend admin handlers (NEW)
+✓ ADMIN_GUIDE.md            - Complete documentation (NEW)
+
+═══════════════════════════════════════════════════════════════
+
+🚀 NEXT STEPS:
+
+1. Run the SQL command in Supabase
+2. Log in to ScuffedSnap
+3. Navigate to /admin
+4. Done! You're now an admin
+
+═══════════════════════════════════════════════════════════════
+
+💡 TIPS:
+
+• You cannot delete your own admin account
+• User deletion requires double confirmation
+• Email addresses visible in Supabase Dashboard only
+• Admin page auto-checks permissions
+
+═══════════════════════════════════════════════════════════════

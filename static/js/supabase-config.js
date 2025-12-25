@@ -16,8 +16,18 @@ let supabaseClient = null;
             throw new Error('Invalid configuration received');
         }
 
-        // Initialize Supabase client using the CDN version
-        supabaseClient = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+        // Initialize Supabase client using the CDN version (v2)
+        // The supabase object is globally available from the CDN script
+        supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
+            db: {
+                schema: 'public'
+            },
+            auth: {
+                autoRefreshToken: true,
+                persistSession: true
+            }
+            // Note: Don't set global Content-Type headers - storage uploads need file MIME types
+        });
 
         // Make it globally available
         window.supabaseClient = supabaseClient;

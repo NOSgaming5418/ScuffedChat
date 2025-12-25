@@ -1,5 +1,21 @@
 // Auth.js - Handles login and signup with Supabase
 
+// Global error display functions
+function showError(message) {
+    const errorDiv = document.getElementById('auth-error');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.classList.add('show');
+    }
+}
+
+function hideError() {
+    const errorDiv = document.getElementById('auth-error');
+    if (errorDiv) {
+        errorDiv.classList.remove('show');
+    }
+}
+
 // Wait for Supabase to be initialized
 if (window.supabaseClient) {
     initializeAuth();
@@ -44,10 +60,10 @@ function initializeAuth() {
         e.preventDefault();
         hideError();
 
-        const email = document.getElementById('login-email').value.trim();
+        const emailOrUsername = document.getElementById('login-email').value.trim();
         const password = document.getElementById('login-password').value;
 
-        if (!email || !password) {
+        if (!emailOrUsername || !password) {
             showError('Please fill in all fields');
             return;
         }
@@ -57,7 +73,24 @@ function initializeAuth() {
         submitBtn.innerHTML = '<span>Logging in...</span>';
 
         try {
-            const { data, error } = await supabaseClient.auth.signInWithPassword({
+            let email = emailOrUsername;
+            
+            // If input doesn't contain @, assume it's a username and look up the email
+            if (!emailOrUsername.includes('@')) {
+                const { data: profiles, error: lookupError } = await window.supabaseClient
+                    .from('profiles')
+                    .select('email')
+                    .eq('username', emailOrUsername)
+                    .single();
+                
+                if (lookupError || !profiles || !profiles.email) {
+                    throw new Error('Username not found');
+                }
+                
+                email = profiles.email;
+            }
+            
+            const { data, error } = await window.supabaseClient.auth.signInWithPassword({
                 email: email,
                 password: password
             });
@@ -114,7 +147,7 @@ function initializeAuth() {
 
         try {
             // Sign up with Supabase Auth
-            const { data: authData, error: authError } = await supabaseClient.auth.signUp({
+            const { data: authData, error: authError } = await window.supabaseClient.auth.signUp({
                 email: email,
                 password: password,
                 options: {
@@ -128,11 +161,12 @@ function initializeAuth() {
 
             // Create user profile in profiles table
             if (authData.user) {
-                const { error: profileError } = await supabaseClient
+                const { error: profileError } = await window.supabaseClient
                     .from('profiles')
                     .insert({
                         id: authData.user.id,
                         username: username,
+                        email: email,
                         avatar: '',
                         created_at: new Date().toISOString()
                     });
@@ -170,20 +204,25 @@ function initializeAuth() {
         }
     });
 
-    function showError(message) {
-        errorDiv.textContent = message;
-        errorDiv.classList.add('show');
+    // Add Google Sign-In event listeners
+    const googleSignupBtn = document.getElementById('google-signup-btn');
+    const googleLoginBtn = document.getElementById('google-login-btn');
+    
+    if (googleSignupBtn) {
+        googleSignupBtn.addEventListener('click', handleGoogleSignIn);
     }
-
-    function hideError() {
-        errorDiv.classList.remove('show');
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', handleGoogleSignIn);
     }
 }
 
 // Check if user is already authenticated
 async function checkAuth() {
     try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!window.supabaseClient) {
+            return;
+        }
+        const { data: { session } } = await window.supabaseClient.auth.getSession();
         if (session) {
             // Already logged in, redirect to app
             window.location.href = '/app';
@@ -244,7 +283,11 @@ createParticles();
 // Google Sign-In handler
 async function handleGoogleSignIn() {
     try {
-        const { data, error } = await supabaseClient.auth.signInWithOAuth({
+        if (!window.supabaseClient) {
+            throw new Error('Supabase client not initialized');
+        }
+        
+        const { data, error } = await window.supabaseClient.auth.signInWithOAuth({
             provider: 'google',
             options: {
                 redirectTo: window.location.origin + '/app'
@@ -254,19 +297,6 @@ async function handleGoogleSignIn() {
         if (error) throw error;
     } catch (error) {
         console.error('Google sign-in error:', error);
-        showError('Failed to sign in with Google');
+        showError('Failed to sign in with Google: ' + error.message);
     }
 }
-
-// Add event listeners for Google buttons
-document.addEventListener('DOMContentLoaded', () => {
-    const googleLoginBtn = document.getElementById('google-login-btn');
-    const googleSignupBtn = document.getElementById('google-signup-btn');
-    
-    if (googleLoginBtn) {
-        googleLoginBtn.addEventListener('click', handleGoogleSignIn);
-    }
-    if (googleSignupBtn) {
-        googleSignupBtn.addEventListener('click', handleGoogleSignIn);
-    }
-});

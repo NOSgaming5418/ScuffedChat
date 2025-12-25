@@ -10,11 +10,22 @@ import (
 
 // Handler is the serverless function entry point for Vercel
 func Handler(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers for all requests
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	// Handle preflight OPTIONS requests
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// API endpoint for config
 	if r.URL.Path == "/api/config" {
 		w.Header().Set("Content-Type", "application/json")
 		config := map[string]string{
-			"supabaseUrl":    os.Getenv("SUPABASE_URL"),
+			"supabaseUrl":     os.Getenv("SUPABASE_URL"),
 			"supabaseAnonKey": os.Getenv("SUPABASE_ANON_KEY"),
 		}
 		json.NewEncoder(w).Encode(config)
@@ -59,7 +70,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, path string) {
 
 func getContentType(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
-	
+
 	switch ext {
 	case ".html":
 		return "text/html"
