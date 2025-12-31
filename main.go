@@ -41,6 +41,21 @@ func main() {
 		json.NewEncoder(w).Encode(config)
 	})
 
+	// TEMPORARY: Debug endpoint to get VAPID keys for setup
+	http.HandleFunc("/api/debug-keys", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		// Only allow looking at this if we are running in an environment where we might need to debug
+		// For now, open to all so user can just grab it.
+
+		keys := map[string]string{
+			"NOTE":              "COPY THESE VALUES TO YOUR VERCEL ENVIRONMENT VARIABLES IMMEDIATELY, THEN REMOVE THIS ENDPOINT",
+			"VAPID_PRIVATE_KEY": vapidPrivateKey,
+			"VAPID_PUBLIC_KEY":  vapidPublicKey,
+		}
+		json.NewEncoder(w).Encode(keys)
+	})
+
 	// HTML pages
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./static/index.html")
