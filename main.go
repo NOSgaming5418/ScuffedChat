@@ -21,6 +21,12 @@ func main() {
 		port = "8080"
 	}
 
+	// Initialize Push Service
+	InitPush()
+
+	// Start Realtime Listener in background
+	go StartRealtimeListener()
+
 	// Static files
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
@@ -28,8 +34,9 @@ func main() {
 	http.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		config := map[string]string{
-			"supabaseUrl":    os.Getenv("SUPABASE_URL"),
+			"supabaseUrl":     os.Getenv("SUPABASE_URL"),
 			"supabaseAnonKey": os.Getenv("SUPABASE_ANON_KEY"),
+			"vapidPublicKey":  GetVapidPublicKey(),
 		}
 		json.NewEncoder(w).Encode(config)
 	})

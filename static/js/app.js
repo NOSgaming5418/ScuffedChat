@@ -186,6 +186,92 @@ async function initializeApp() {
 
     // Setup WebSocket for online status
     setupWebSocket();
+
+    // Initialize Push Notifications
+    initPushNotifications();
+}
+
+async function initPushNotifications() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('Push notifications not supported');
+        return;
+    }
+
+    try {
+        // Register Service Worker
+        const registration = await navigator.serviceWorker.register('/static/sw.js');
+        console.log('Service Worker registered');
+
+        // Get VAPID key from backend
+        // Note: We use the local backend /api/config since main.go serves the frontend
+        const response = await fetch('/api/config');
+        const config = await response.json();
+
+        if (!config.vapidPublicKey) {
+            console.warn('VAPID Public Key not found in config');
+            return;
+        }
+
+        // Check permission
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            console.log('Notification permission denied');
+            return;
+        }
+
+        // Subscribe
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey)
+        });
+
+        // Save to Supabase
+        await savePushSubscription(subscription);
+
+    } catch (error) {
+        console.error('Push notification initialization failed:', error);
+    }
+}
+
+async function savePushSubscription(subscription) {
+    if (!currentUser) return;
+
+    const subscriptionJson = subscription.toJSON();
+    const endpoint = subscriptionJson.endpoint;
+    const p256dh = subscriptionJson.keys.p256dh;
+    const auth = subscriptionJson.keys.auth;
+
+    try {
+        // Upsert subscription
+        const { error } = await window.supabaseClient
+            .from('push_subscriptions')
+            .upsert({
+                user_id: currentUser.id,
+                endpoint: endpoint,
+                p256dh: p256dh,
+                auth: auth
+            }, { onConflict: 'user_id, endpoint' });
+
+        if (error) throw error;
+        console.log('Push subscription saved to Supabase');
+    } catch (error) {
+        console.error('Failed to save push subscription:', error);
+    }
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/\-/g, '+')
+        .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
 }
 
 // Setup WebSocket connection and online status listeners
