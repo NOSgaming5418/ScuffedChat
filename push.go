@@ -70,23 +70,34 @@ func GetVapidPublicKey() string {
 
 func StartRealtimeListener() {
 	supabaseURL := os.Getenv("SUPABASE_URL")
+	// Use Service Role Key for Realtime if available to bypass RLS
 	anonKey := os.Getenv("SUPABASE_ANON_KEY")
+	serviceKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
+	token := anonKey
+	if serviceKey != "" {
+		token = serviceKey
+		log.Println("🔑 Using Service Role Key for Realtime (RLS Bypass)")
+	} else {
+		log.Println("⚠️  WARNING: Service Role Key missing. Realtime listener may fail to see new messages due to RLS.")
+	}
 
-	if supabaseURL == "" || anonKey == "" {
-		log.Println("❌ Supabase URL or Anon Key missing, Realtime listener disabled")
+	if supabaseURL == "" || token == "" {
+		log.Println("❌ Supabase URL or Key missing, Realtime listener disabled")
 		return
 	}
 
 	// Construct WebSocket URL
-	// wss://<project>.supabase.co/realtime/v1/websocket?apikey=<anon_key>&vsn=1.0.0
-	wsURL := fmt.Sprintf("%s/realtime/v1/websocket?apikey=%s&vsn=1.0.0", supabaseURL, anonKey)
+	wsURL := fmt.Sprintf("%s/realtime/v1/websocket?apikey=%s&vsn=1.0.0", supabaseURL, anonKey) // Connection auth often needs anon key in query param, but join payload needs auth token
+	// Actually, the apikey in URL is usually the anon key key. Authentication happens in the channel join or access_token message.
+	// But let's try using the token in URL too if anon fails.
+
 	// Replace https:// with wss://
 	if len(wsURL) > 8 && wsURL[:8] == "https://" {
 		wsURL = "wss://" + wsURL[8:]
 	}
 
 	for {
-		connectAndListen(wsURL, anonKey)
+		connectAndListen(wsURL, token)
 		log.Println("Realtime disconnected, retrying in 5 seconds...")
 		time.Sleep(5 * time.Second)
 	}
