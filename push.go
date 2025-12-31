@@ -113,18 +113,34 @@ func connectAndListen(wsURL, token string) {
 
 	log.Println("✅ Connected to Supabase Realtime")
 
-	// Join channel for messages table
-	// Protocol: ["1", "1", "realtime:public:messages", "phx_join", {}]
-	// But standard Supabase implementation uses "realtime:public" topic for postgres_changes
+	// 2. Define subscription config for INSERT on messages
+	// The payload for subscription
+	config := map[string]interface{}{
+		"access_token": token, // Pass the token (Service Role Key) here for auth/RLS bypass
+		"user_token":   token, // Include both just in case
+		"config": map[string]interface{}{
+			"postgres_changes": []map[string]interface{}{
+				{
+					"event":  "INSERT",
+					"schema": "public",
+					"table":  "messages",
+				},
+			},
+		},
+	}
 
-	// UNUSED: joinMsg := []interface{}{"1", "1", "realtime:public", "phx_join", map[string]string{
-	// 	"user_token": token, // may be needed?
-	// }}
+	// 1. Join with config
+	// Channel name can be anything for broadcast/presence, but for postgres_changes we typically use "realtime:public" or similar?
+	// Actually "room_1" is fine as long as we send the config.
+	channelName := "room_1"
 
-	// Subscribe to postgres_changes on messages table
-	// Ref: https://supabase.com/docs/guides/realtime/protocol
+	// Correct format: [Ref, Ref, Topic, Event, Payload]
+	if err := c.WriteJSON([]interface{}{"1", "1", channelName, "phx_join", config}); err != nil {
+		log.Println("Join error:", err)
+		return
+	}
 
-	// We actually just listen to the channel. The JOIN response should say "ok".
+	log.Printf("Listening for new messages on channel %s...", channelName)
 
 	// Start heartbeat
 	go func() {
