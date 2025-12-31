@@ -9,6 +9,111 @@ let friendRequests = [];
 let disappearingMode = false;
 let messageSubscription = null;
 
+// Online status tracking
+const onlineUsers = new Map();
+
+// Notification Manager for sound playback (works on mobile/desktop)
+const NotificationManager = {
+    audioContext: null,
+    audioBuffer: null,
+    customSoundLoaded: false,
+    enabled: true,
+    soundPath: '/static/sounds/notification.mp3',
+
+    init() {
+        // Initialize on first user interaction for mobile compatibility
+        if (!this.audioContext) {
+            try {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                // Try to load custom sound file
+                this.loadCustomSound();
+            } catch (e) {
+                console.warn('AudioContext not supported:', e);
+            }
+        }
+    },
+
+    async loadCustomSound() {
+        if (!this.audioContext || this.customSoundLoaded) return;
+
+        try {
+            const response = await fetch(this.soundPath);
+            if (response.ok) {
+                const arrayBuffer = await response.arrayBuffer();
+                this.audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                this.customSoundLoaded = true;
+                console.log('Custom notification sound loaded successfully');
+            }
+        } catch (e) {
+            console.log('Custom sound not found, using generated sound:', e.message);
+        }
+    },
+
+    async playNotificationSound() {
+        if (!this.enabled) return;
+
+        try {
+            // Initialize if needed
+            if (!this.audioContext) {
+                this.init();
+            }
+
+            if (this.audioContext && this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+
+            if (!this.audioContext) return;
+
+            // Play custom sound if loaded
+            if (this.audioBuffer) {
+                const source = this.audioContext.createBufferSource();
+                const gainNode = this.audioContext.createGain();
+                source.buffer = this.audioBuffer;
+                gainNode.gain.setValueAtTime(0.5, this.audioContext.currentTime);
+                source.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                source.start();
+                return;
+            }
+
+            // Fallback: Create a pleasant notification sound using oscillators
+            const ctx = this.audioContext;
+            const now = ctx.currentTime;
+
+            // First tone
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now); // A5
+            gain1.gain.setValueAtTime(0.3, now);
+            gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.15);
+
+            // Second tone (higher)
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1320, now + 0.1); // E6
+            gain2.gain.setValueAtTime(0.25, now + 0.1);
+            gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.1);
+            osc2.stop(now + 0.3);
+
+        } catch (e) {
+            console.warn('Failed to play notification sound:', e);
+        }
+    }
+};
+
+// Initialize audio on first user interaction
+document.addEventListener('click', () => NotificationManager.init(), { once: true });
+document.addEventListener('touchstart', () => NotificationManager.init(), { once: true });
+
 // Wait for Supabase to be initialized before running app
 if (window.supabaseClient) {
     initializeApp();
@@ -78,12 +183,62 @@ async function initializeApp() {
 
     // Setup event listeners
     setupEventListeners();
+
+    // Setup WebSocket for online status
+    setupWebSocket();
+}
+
+// Setup WebSocket connection and online status listeners
+function setupWebSocket() {
+    if (!window.wsClient) {
+        console.warn('WebSocket client not available');
+        return;
+    }
+
+    // Connect WebSocket
+    window.wsClient.connect();
+
+    // Listen for online status changes
+    window.wsClient.on('online_status', (payload) => {
+        const { user_id, online } = payload;
+
+        if (online) {
+            onlineUsers.set(user_id, true);
+        } else {
+            onlineUsers.delete(user_id);
+        }
+
+        // Update UI for friends list
+        renderFriends();
+
+        // Update UI for conversations
+        renderConversations();
+
+        // Update chat header if currently chatting with this user
+        if (currentChat && currentChat.id === user_id) {
+            updateChatOnlineStatus(online);
+        }
+    });
+}
+
+// Update chat header online status
+function updateChatOnlineStatus(online) {
+    const indicator = document.getElementById('chat-online-indicator');
+    const status = document.getElementById('chat-status');
+
+    if (indicator) {
+        indicator.classList.toggle('offline', !online);
+    }
+    if (status) {
+        status.textContent = online ? 'Online' : 'Offline';
+        status.classList.toggle('online', online);
+    }
 }
 
 function updateUserProfile() {
     if (currentUserProfile) {
         document.getElementById('username').textContent = currentUserProfile.username;
-        
+
         // Update avatar display
         const avatarEl = document.getElementById('user-avatar');
         if (currentUserProfile.avatar && currentUserProfile.avatar.trim() !== '') {
@@ -115,6 +270,8 @@ function setupRealtimeSubscription() {
 
                     if (message.sender_id !== currentUser.id) {
                         showToast('New message received!', 'success');
+                        // Play notification sound
+                        NotificationManager.playNotificationSound();
                     }
                 }
             }
@@ -143,7 +300,7 @@ function setupRealtimeSubscription() {
                         const contentDiv = messageElement.querySelector('.message-content');
                         if (contentDiv) {
                             contentDiv.textContent = message.content;
-                            
+
                             // Add or update edited indicator
                             let editedSpan = messageElement.querySelector('.message-edited');
                             if (!editedSpan) {
@@ -182,7 +339,7 @@ function setupEventListeners() {
     document.getElementById('user-profile').addEventListener('click', () => {
         openProfileEditModal();
     });
-    
+
     // Logout
     document.getElementById('logout-btn').addEventListener('click', async () => {
         try {
@@ -433,7 +590,7 @@ async function handleImageUpload(e) {
 
         // Convert image to base64 and send directly in message
         const reader = new FileReader();
-        reader.onload = async function(event) {
+        reader.onload = async function (event) {
             try {
                 const base64Image = event.target.result;
 
@@ -474,7 +631,7 @@ async function handleImageUpload(e) {
             }
         };
 
-        reader.onerror = function() {
+        reader.onerror = function () {
             showToast('Failed to read image file', 'error');
         };
 
@@ -595,15 +752,20 @@ function renderConversations() {
         return;
     }
 
-    container.innerHTML = conversations.map(conv => `
+    container.innerHTML = conversations.map(conv => {
+        const isOnline = onlineUsers.has(conv.user.id);
+        const unreadDisplay = conv.unread_count > 9 ? '9+' : conv.unread_count;
+
+        return `
         <button class="conversation-item ${currentChat && currentChat.id === conv.user.id ? 'active' : ''}" 
                 data-user-id="${conv.user.id}"
                 onclick="openChat('${conv.user.id}')">
             <div class="avatar">
-                ${conv.user.avatar ? 
-                    `<img src="${conv.user.avatar}" alt="${escapeHtml(conv.user.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
-                    `<span>${conv.user.username.charAt(0).toUpperCase()}</span>`
-                }
+                ${conv.user.avatar ?
+                `<img src="${conv.user.avatar}" alt="${escapeHtml(conv.user.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+                `<span>${conv.user.username.charAt(0).toUpperCase()}</span>`
+            }
+                <span class="online-indicator ${isOnline ? '' : 'offline'}"></span>
             </div>
             <div class="conversation-info">
                 <div class="conversation-name">
@@ -614,11 +776,12 @@ function renderConversations() {
                 </div>
                 <div class="conversation-preview">
                     <span>${conv.last_message ? escapeHtml(truncate(conv.last_message.content, 30)) : 'Start a conversation'}</span>
-                    ${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : ''}
+                    ${conv.unread_count > 0 ? `<span class="unread-badge">${unreadDisplay}</span>` : ''}
                 </div>
             </div>
         </button>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function filterConversations(query) {
@@ -641,23 +804,28 @@ function renderFriends() {
         return;
     }
 
-    container.innerHTML = friends.map(friend => `
+    container.innerHTML = friends.map(friend => {
+        const isOnline = onlineUsers.has(friend.id);
+
+        return `
         <div class="friend-item">
             <div class="avatar">
-                ${friend.avatar ? 
-                    `<img src="${friend.avatar}" alt="${escapeHtml(friend.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
-                    `<span>${friend.username.charAt(0).toUpperCase()}</span>`
-                }
+                ${friend.avatar ?
+                `<img src="${friend.avatar}" alt="${escapeHtml(friend.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+                `<span>${friend.username.charAt(0).toUpperCase()}</span>`
+            }
+                <span class="online-indicator ${isOnline ? '' : 'offline'}"></span>
             </div>
             <div class="friend-info">
                 <span class="friend-name">${escapeHtml(friend.username)}</span>
-                <span class="friend-status">Friend</span>
+                <span class="friend-status ${isOnline ? 'online' : ''}">${isOnline ? 'Online' : 'Offline'}</span>
             </div>
             <div class="friend-actions">
                 <button class="btn-message" onclick="openChat('${friend.id}')">Message</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function renderFriendRequests() {
@@ -681,10 +849,10 @@ function renderFriendRequests() {
         return `
             <div class="friend-item" data-request-id="${req.id}" data-username="${username}" style="cursor: pointer;">
                 <div class="avatar">
-                    ${req.from.avatar ? 
-                        `<img src="${req.from.avatar}" alt="${username}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` : 
-                        `<span>${initial}</span>`
-                    }
+                    ${req.from.avatar ?
+                `<img src="${req.from.avatar}" alt="${username}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+                `<span>${initial}</span>`
+            }
                 </div>
                 <div class="friend-info">
                     <span class="friend-name">${username}</span>
@@ -747,7 +915,7 @@ function createMessageHTML(message, received) {
     const hasExpiry = message.expires_at != null;
     const isImage = message.type === 'image';
     const isEdited = message.edited || false;
-    
+
     let contentHTML;
     if (isImage) {
         contentHTML = `<img src="${escapeHtml(message.content)}" alt="Image" class="message-image" loading="lazy" onclick="openImageViewer('${escapeHtml(message.content)}')">`;
@@ -818,7 +986,10 @@ window.openChat = async function (partnerId) {
         chatAvatar.textContent = user.username.charAt(0).toUpperCase();
     }
     document.getElementById('chat-username').textContent = user.username;
-    document.getElementById('chat-status').textContent = 'Online';
+
+    // Set online status
+    const isOnline = onlineUsers.has(user.id);
+    updateChatOnlineStatus(isOnline);
 
     // Update active conversation
     document.querySelectorAll('.conversation-item').forEach(item => {
@@ -919,30 +1090,30 @@ let longPressTimer = null;
 
 function showMessageContextMenu(event, messageId, isSentByMe) {
     event.preventDefault();
-    
+
     if (!isSentByMe) return; // Only show context menu for messages you sent
-    
+
     selectedMessageId = messageId;
     const menu = document.getElementById('message-context-menu');
-    
+
     menu.style.display = 'block';
-    
+
     // Position menu to the left of cursor
     const menuWidth = 180; // min-width from CSS
     menu.style.left = (event.pageX - menuWidth - 10) + 'px';
     menu.style.top = event.pageY + 'px';
-    
+
     // Set up button handlers
     const deleteBtn = document.getElementById('delete-message-btn');
     const editBtn = document.getElementById('edit-message-btn');
-    
+
     deleteBtn.onclick = () => deleteMessage(messageId);
     editBtn.onclick = () => editMessage(messageId);
 }
 
 function handleLongPressStart(event, messageId, isSentByMe) {
     if (!isSentByMe) return;
-    
+
     longPressTimer = setTimeout(() => {
         // Trigger context menu on long press
         showMessageContextMenu(event, messageId, isSentByMe);
@@ -960,42 +1131,42 @@ async function editMessage(messageId) {
     try {
         // Hide context menu
         document.getElementById('message-context-menu').style.display = 'none';
-        
+
         // Get the message element
         const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
         if (!messageElement) return;
-        
+
         // Get current message content
         const contentDiv = messageElement.querySelector('.message-content');
         if (!contentDiv) return; // Can't edit image messages
-        
+
         const currentContent = contentDiv.textContent;
-        
+
         // Prompt for new content
         const newContent = prompt('Edit message:', currentContent);
         if (newContent === null || newContent.trim() === '' || newContent === currentContent) {
             return; // User cancelled or no changes
         }
-        
+
         // Update in database
         const { error } = await window.supabaseClient
             .from('messages')
-            .update({ 
+            .update({
                 content: newContent.trim(),
                 edited: true,
                 updated_at: new Date().toISOString()
             })
             .eq('id', messageId)
             .eq('sender_id', currentUser.id);
-        
+
         if (error) {
             console.error('Edit error:', error);
             throw error;
         }
-        
+
         // Update UI
         contentDiv.textContent = newContent.trim();
-        
+
         // Add edited indicator if not present
         let editedSpan = messageElement.querySelector('.message-edited');
         if (!editedSpan) {
@@ -1007,9 +1178,9 @@ async function editMessage(messageId) {
                 timeDiv.appendChild(editedSpan);
             }
         }
-        
+
         showToast('Message edited', 'success');
-        
+
         // Reload conversations to update preview
         loadConversations();
     } catch (error) {
@@ -1040,9 +1211,9 @@ async function deleteMessage(messageId) {
 
         // Hide context menu
         document.getElementById('message-context-menu').style.display = 'none';
-        
+
         showToast('Message deleted', 'success');
-        
+
         // Reload conversations to update preview
         loadConversations();
     } catch (error) {
@@ -1080,36 +1251,36 @@ function showUsernameSetupModal() {
     const modal = document.getElementById('username-setup-modal');
     const input = document.getElementById('setup-username');
     const errorDiv = document.getElementById('username-error');
-    
+
     // Pre-fill with current username if exists
     if (currentUserProfile && currentUserProfile.username) {
         input.value = currentUserProfile.username.replace('@', '');
     }
-    
+
     modal.style.display = 'flex';
     errorDiv.style.display = 'none';
-    
+
     // Setup submit handler
     const confirmBtn = document.getElementById('confirm-username-btn');
     confirmBtn.onclick = async () => {
         const username = input.value.trim();
-        
+
         // Validate username
         if (username.length < 3 || username.length > 20) {
             errorDiv.textContent = 'Username must be 3-20 characters';
             errorDiv.style.display = 'block';
             return;
         }
-        
+
         if (!/^[a-zA-Z0-9_]+$/.test(username)) {
             errorDiv.textContent = 'Username can only contain letters, numbers, and underscores';
             errorDiv.style.display = 'block';
             return;
         }
-        
+
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Saving...';
-        
+
         try {
             // Check if username is taken
             const { data: existing } = await window.supabaseClient
@@ -1118,7 +1289,7 @@ function showUsernameSetupModal() {
                 .eq('username', username)
                 .neq('id', currentUser.id)
                 .single();
-            
+
             if (existing) {
                 errorDiv.textContent = 'Username is already taken';
                 errorDiv.style.display = 'block';
@@ -1126,32 +1297,32 @@ function showUsernameSetupModal() {
                 confirmBtn.textContent = 'Continue';
                 return;
             }
-            
+
             // Update profile
             const { error } = await window.supabaseClient
                 .from('profiles')
                 .update({ username: username })
                 .eq('id', currentUser.id);
-            
+
             if (error) throw error;
-            
+
             // Update local profile
             currentUserProfile.username = username;
             updateUserProfile();
-            
+
             // Close modal and load app
             modal.style.display = 'none';
-            
+
             // Now load the app data
             await Promise.all([
                 loadConversations(),
                 loadFriends(),
                 loadFriendRequests()
             ]);
-            
+
             setupRealtimeSubscription();
             setupEventListeners();
-            
+
         } catch (error) {
             console.error('Failed to set username:', error);
             errorDiv.textContent = 'Failed to save username. Please try again.';
@@ -1172,10 +1343,10 @@ function openProfileEditModal() {
     const errorDiv = document.getElementById('profile-error');
     const avatarPreview = document.getElementById('avatar-preview-img');
     const avatarText = document.getElementById('avatar-preview-text');
-    
+
     // Pre-fill with current data
     input.value = currentUserProfile.username;
-    
+
     // Show current avatar
     if (currentUserProfile.avatar && currentUserProfile.avatar.trim() !== '') {
         avatarPreview.src = currentUserProfile.avatar;
@@ -1186,7 +1357,7 @@ function openProfileEditModal() {
         avatarText.style.display = 'flex';
         avatarText.textContent = currentUserProfile.username.charAt(0).toUpperCase();
     }
-    
+
     modal.style.display = 'flex';
     errorDiv.style.display = 'none';
 }
@@ -1208,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             // Check file size (5MB max)
             if (file.size > 5 * 1024 * 1024) {
                 const errorDiv = document.getElementById('profile-error');
@@ -1217,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 fileInput.value = '';
                 return;
             }
-            
+
             // Check file type
             if (!file.type.startsWith('image/')) {
                 const errorDiv = document.getElementById('profile-error');
@@ -1226,7 +1397,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 fileInput.value = '';
                 return;
             }
-            
+
             // Preview the image
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -1239,7 +1410,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reader.readAsDataURL(file);
         });
     }
-    
+
     // Save profile button
     const saveBtn = document.getElementById('save-profile-btn');
     if (saveBtn) {
@@ -1247,28 +1418,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const username = document.getElementById('edit-username').value.trim();
             const fileInput = document.getElementById('avatar-upload');
             const errorDiv = document.getElementById('profile-error');
-            
+
             // Validate username
             if (username.length < 3 || username.length > 20) {
                 errorDiv.textContent = 'Username must be 3-20 characters';
                 errorDiv.style.display = 'block';
                 return;
             }
-            
+
             saveBtn.disabled = true;
             saveBtn.textContent = 'Saving...';
             errorDiv.style.display = 'none';
-            
+
             try {
                 let avatarUrl = currentUserProfile.avatar;
-                
+
                 // Upload avatar if file selected
                 if (fileInput.files.length > 0) {
                     const file = fileInput.files[0];
                     const fileExt = file.name.split('.').pop();
                     const fileName = `${Date.now()}.${fileExt}`;
                     const filePath = `${currentUser.id}/${fileName}`; // Upload to user's folder
-                    
+
                     // Upload to Supabase Storage
                     const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
                         .from('avatars')
@@ -1276,17 +1447,17 @@ document.addEventListener('DOMContentLoaded', () => {
                             cacheControl: '3600',
                             upsert: true
                         });
-                    
+
                     if (uploadError) throw uploadError;
-                    
+
                     // Get public URL
                     const { data: urlData } = window.supabaseClient.storage
                         .from('avatars')
                         .getPublicUrl(filePath);
-                    
+
                     avatarUrl = urlData.publicUrl;
                 }
-                
+
                 // Check if username changed and is taken
                 if (username !== currentUserProfile.username) {
                     const { data: existing } = await window.supabaseClient
@@ -1295,7 +1466,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         .eq('username', username)
                         .neq('id', currentUser.id)
                         .single();
-                    
+
                     if (existing) {
                         errorDiv.textContent = 'Username is already taken';
                         errorDiv.style.display = 'block';
@@ -1304,29 +1475,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                 }
-                
+
                 // Update profile
                 const { error } = await window.supabaseClient
                     .from('profiles')
-                    .update({ 
+                    .update({
                         username: username,
                         avatar: avatarUrl
                     })
                     .eq('id', currentUser.id);
-                
+
                 if (error) throw error;
-                
+
                 // Update local profile
                 currentUserProfile.username = username;
                 currentUserProfile.avatar = avatarUrl;
                 updateUserProfile();
-                
+
                 // Refresh conversations to update display names
                 await loadConversations();
-                
+
                 closeProfileEditModal();
                 showToast('Profile updated successfully', 'success');
-                
+
             } catch (error) {
                 console.error('Failed to update profile:', error);
                 errorDiv.textContent = 'Failed to save changes. Please try again.';

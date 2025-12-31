@@ -887,6 +887,10 @@ body {
     text-overflow: ellipsis;
 }
 
+.friend-status.online {
+    color: var(--accent-green);
+}
+
 .friend-actions {
     display: flex;
     gap: var(--spacing-xs);
