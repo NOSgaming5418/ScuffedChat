@@ -1,5 +1,100 @@
 -- ScuffedChat Complete Database Schema (Consolidated)
--- Run this entire script in your Supabase SQL Editor to set up everything.
+-- Compatible with Supabase AND Standard PostgreSQL (Self-Hosted)
+
+-- ========================================
+-- 0. COMPATIBILITY LAYER (For Vanilla Postgres)
+-- ========================================
+
+-- Create schemas if they don't exist (Standard Postgres doesn't have 'auth' or 'storage' by default)
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS storage;
+
+-- Create roles if they don't exist (Supabase specific roles)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      CREATE ROLE anon NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+      CREATE ROLE authenticated NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+      CREATE ROLE service_role NOLOGIN; -- Bypass RLS
+  END IF;
+END
+$$;
+
+-- Grant permissions to new roles
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon, authenticated, service_role;
+
+-- Create auth.users table if it doesn't exist (Simplified mock for foreign keys)
+CREATE TABLE IF NOT EXISTS auth.users (
+    id UUID PRIMARY KEY,
+    email VARCHAR(255) UNIQUE,
+    encrypted_password VARCHAR(255),
+    email_confirmed_at TIMESTAMPTZ,
+    invited_at TIMESTAMPTZ,
+    confirmation_token VARCHAR(255),
+    recovery_token VARCHAR(255),
+    email_change_token_new VARCHAR(255),
+    email_change VARCHAR(255),
+    last_sign_in_at TIMESTAMPTZ,
+    raw_app_meta_data JSONB,
+    raw_user_meta_data JSONB,
+    is_super_admin BOOLEAN,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ
+);
+
+-- Mock auth.uid() function if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'uid' AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'auth')) THEN
+        CREATE FUNCTION auth.uid() RETURNS uuid AS 'SELECT NULL::uuid;' LANGUAGE sql;
+    END IF;
+END $$;
+
+-- Create storage tables if they don't exist
+CREATE TABLE IF NOT EXISTS storage.buckets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner UUID REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    public BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS storage.objects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_id TEXT REFERENCES storage.buckets(id),
+    name TEXT,
+    owner UUID REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
+    metadata JSONB,
+    path_tokens TEXT[] GENERATED ALWAYS AS (string_to_array(name, '/')) STORED
+);
+
+-- Mock storage.foldername function
+CREATE OR REPLACE FUNCTION storage.foldername(name text)
+RETURNS text[] LANGUAGE sql AS $$
+SELECT string_to_array(name, '/');
+$$;
+
+-- Ensure supabase_realtime publication exists
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+        CREATE PUBLICATION supabase_realtime;
+    END IF;
+END $$;
 
 -- ========================================
 -- 1. CREATE TABLES
@@ -85,12 +180,15 @@ ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 -- 4. PROFILES RLS POLICIES
 -- ========================================
 
+DROP POLICY IF EXISTS "Users can view all profiles" ON profiles;
 CREATE POLICY "Users can view all profiles" ON profiles
     FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
 CREATE POLICY "Users can insert their own profile" ON profiles
     FOR INSERT WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 CREATE POLICY "Users can update their own profile" ON profiles
     FOR UPDATE USING (auth.uid() = id);
 
@@ -98,18 +196,23 @@ CREATE POLICY "Users can update their own profile" ON profiles
 -- 5. MESSAGES RLS POLICIES
 -- ========================================
 
+DROP POLICY IF EXISTS "Users can view their own messages" ON messages;
 CREATE POLICY "Users can view their own messages" ON messages
     FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 
+DROP POLICY IF EXISTS "Users can send messages" ON messages;
 CREATE POLICY "Users can send messages" ON messages
     FOR INSERT WITH CHECK (auth.uid() = sender_id);
 
+DROP POLICY IF EXISTS "Users can update messages they received (mark as read)" ON messages;
 CREATE POLICY "Users can update messages they received (mark as read)" ON messages
     FOR UPDATE USING (auth.uid() = receiver_id);
 
+DROP POLICY IF EXISTS "Users can update messages they sent (edit content)" ON messages;
 CREATE POLICY "Users can update messages they sent (edit content)" ON messages
     FOR UPDATE USING (auth.uid() = sender_id);
 
+DROP POLICY IF EXISTS "Users can delete messages they sent" ON messages;
 CREATE POLICY "Users can delete messages they sent" ON messages
     FOR DELETE USING (auth.uid() = sender_id);
 
@@ -117,15 +220,19 @@ CREATE POLICY "Users can delete messages they sent" ON messages
 -- 6. FRIENDS RLS POLICIES
 -- ========================================
 
+DROP POLICY IF EXISTS "Users can view their friendships" ON friends;
 CREATE POLICY "Users can view their friendships" ON friends
     FOR SELECT USING (auth.uid() = user_id OR auth.uid() = friend_id);
 
+DROP POLICY IF EXISTS "Users can send friend requests" ON friends;
 CREATE POLICY "Users can send friend requests" ON friends
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can update friend requests sent to them" ON friends;
 CREATE POLICY "Users can update friend requests sent to them" ON friends
     FOR UPDATE USING (auth.uid() = friend_id);
 
+DROP POLICY IF EXISTS "Users can delete their friendships" ON friends;
 CREATE POLICY "Users can delete their friendships" ON friends
     FOR DELETE USING (auth.uid() = user_id OR auth.uid() = friend_id);
 
@@ -133,16 +240,20 @@ CREATE POLICY "Users can delete their friendships" ON friends
 -- 7. PUSH NOTIFICATIONS RLS POLICIES
 -- ========================================
 
+DROP POLICY IF EXISTS "Users can view their own subscriptions" ON push_subscriptions;
 CREATE POLICY "Users can view their own subscriptions" ON push_subscriptions
     FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert their own subscriptions" ON push_subscriptions;
 CREATE POLICY "Users can insert their own subscriptions" ON push_subscriptions
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can delete their own subscriptions" ON push_subscriptions;
 CREATE POLICY "Users can delete their own subscriptions" ON push_subscriptions
     FOR DELETE USING (auth.uid() = user_id);
 
 -- Allow service role (backend) to read all subscriptions
+DROP POLICY IF EXISTS "Service role can read all subscriptions" ON push_subscriptions;
 CREATE POLICY "Service role can read all subscriptions" ON push_subscriptions
     FOR SELECT USING (true);
 
@@ -150,8 +261,15 @@ CREATE POLICY "Service role can read all subscriptions" ON push_subscriptions
 -- 8. ENABLE REALTIME
 -- ========================================
 
-ALTER PUBLICATION supabase_realtime ADD TABLE messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE friends;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'messages') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'friends') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE friends;
+    END IF;
+END $$;
 
 -- ========================================
 -- 9. CREATE STORAGE BUCKET FOR AVATARS

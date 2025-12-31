@@ -203,7 +203,6 @@ async function initPushNotifications() {
         console.log('Service Worker registered');
 
         // Get VAPID key from backend
-        // Note: We use the local backend /api/config since main.go serves the frontend
         const response = await fetch('/api/config');
         const config = await response.json();
 
@@ -212,20 +211,58 @@ async function initPushNotifications() {
             return;
         }
 
-        // Check permission
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-            console.log('Notification permission denied');
-            return;
+        const serverKey = urlBase64ToUint8Array(config.vapidPublicKey);
+
+        // Check if we already have a subscription
+        let subscription = await registration.pushManager.getSubscription();
+
+        if (subscription) {
+            // Check if the key matches
+            const currentKey = subscription.options.applicationServerKey;
+
+            // Convert ArrayBuffers to verify equality if possible, or just re-subscribe if unsure
+            // Easier way: Unsubscribe and resubscribe if keys might have changed
+            // But we can check keys using strings comparison or byte comparison
+
+            const existingKeyArray = new Uint8Array(currentKey);
+            const serverKeyArray = new Uint8Array(serverKey);
+
+            let keysMatch = true;
+            if (existingKeyArray.length !== serverKeyArray.length) {
+                keysMatch = false;
+            } else {
+                for (let i = 0; i < existingKeyArray.length; i++) {
+                    if (existingKeyArray[i] !== serverKeyArray[i]) {
+                        keysMatch = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!keysMatch) {
+                console.log('VAPID key changed, unsubscribing...');
+                await subscription.unsubscribe();
+                subscription = null;
+            }
         }
 
-        // Subscribe
-        const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey)
-        });
+        if (!subscription) {
+            // Check permission
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                console.log('Notification permission denied');
+                return;
+            }
 
-        // Save to Supabase
+            // Subscribe
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: serverKey
+            });
+            console.log('Subscribed to push notifications');
+        }
+
+        // Always save to Supabase to ensure it's up to date
         await savePushSubscription(subscription);
 
     } catch (error) {

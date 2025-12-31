@@ -40,14 +40,27 @@ type RealtimeMessage struct {
 	} `json:"payload"`
 }
 
+type VapidKeys struct {
+	PrivateKey string `json:"privateKey"`
+	PublicKey  string `json:"publicKey"`
+}
+
 func InitPush() {
 	// Try to load keys from .env or file, otherwise generate
-	// For simplicity in this env, we'll generate if missing and print
-	// In a real app, we should save these to a file or .env
 
 	// Check env first
 	vapidPrivateKey = os.Getenv("VAPID_PRIVATE_KEY")
 	vapidPublicKey = os.Getenv("VAPID_PUBLIC_KEY")
+
+	// If not in env, check file
+	if vapidPrivateKey == "" || vapidPublicKey == "" {
+		fileKeys, err := loadVapidKeysFromFile()
+		if err == nil {
+			vapidPrivateKey = fileKeys.PrivateKey
+			vapidPublicKey = fileKeys.PublicKey
+			log.Println("✅ Loaded VAPID keys from vapid_keys.json")
+		}
+	}
 
 	if vapidPrivateKey == "" || vapidPublicKey == "" {
 		privateKey, publicKey, err := webpush.GenerateVAPIDKeys()
@@ -58,10 +71,51 @@ func InitPush() {
 		vapidPublicKey = publicKey
 
 		log.Println("⚠️  GENERATED NEW VAPID KEYS")
-		log.Println("Add these to your .env file to persist them:")
+
+		// Save to file for persistence (if possible)
+		err = saveVapidKeysToFile(vapidPrivateKey, vapidPublicKey)
+		if err != nil {
+			log.Println("⚠️  Could not save keys to file (likely read-only fs):", err)
+			log.Println("⚠️  YOU MUST SET THE FOLLOWING ENV VARS IN YOUR DEPLOYMENT SETTINGS TO PERSIST KEYS:")
+		} else {
+			log.Println("✅ Saved new VAPID keys to vapid_keys.json")
+			log.Println("Add these to your .env file to persist them (optional since we saved to file):")
+		}
+
 		fmt.Printf("VAPID_PRIVATE_KEY=%s\n", vapidPrivateKey)
 		fmt.Printf("VAPID_PUBLIC_KEY=%s\n", vapidPublicKey)
 	}
+}
+
+func loadVapidKeysFromFile() (*VapidKeys, error) {
+	file, err := os.Open("vapid_keys.json")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var keys VapidKeys
+	if err := json.NewDecoder(file).Decode(&keys); err != nil {
+		return nil, err
+	}
+	return &keys, nil
+}
+
+func saveVapidKeysToFile(privateKey, publicKey string) error {
+	keys := VapidKeys{
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	}
+
+	file, err := os.Create("vapid_keys.json")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(keys)
 }
 
 func GetVapidPublicKey() string {
@@ -338,14 +392,13 @@ func sendPushNamespace(sub PushSubscriptionStruct, content, msgType string) {
 	})
 	if err != nil {
 		log.Println("Push error:", err)
-		// If 410 Gone, delete subscription
 		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 410 {
-		// Delete subscription
-		log.Println("Subscription expired, deleting...")
+	if resp.StatusCode == 410 || resp.StatusCode == 401 || resp.StatusCode == 403 {
+		// Delete subscription i it's gone or invalid
+		log.Printf("Subscription invalid (Status %d), deleting...", resp.StatusCode)
 		deleteSubscriptionFromSupabase(sub.Endpoint)
 	}
 }
