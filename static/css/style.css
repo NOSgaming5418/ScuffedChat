@@ -8,31 +8,31 @@
     --primary: #FFFC00;
     --primary-dark: #E6E300;
     --primary-glow: rgba(255, 252, 0, 0.3);
-    
+
     --bg-dark: #0D0D0D;
     --bg-darker: #000000;
     --bg-card: rgba(30, 30, 30, 0.8);
     --bg-card-hover: rgba(40, 40, 40, 0.9);
     --bg-input: rgba(255, 255, 255, 0.05);
     --bg-input-focus: rgba(255, 255, 255, 0.1);
-    
+
     --text-primary: #FFFFFF;
     --text-secondary: rgba(255, 255, 255, 0.7);
     --text-muted: rgba(255, 255, 255, 0.4);
-    
+
     --accent-green: #00D26A;
     --accent-red: #FF4757;
     --accent-blue: #3B82F6;
-    
+
     --border-subtle: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.2);
-    
+
     /* Shadows */
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
     --shadow-glow: 0 0 30px var(--primary-glow);
-    
+
     /* Spacing */
     --spacing-xs: 4px;
     --spacing-sm: 8px;
@@ -40,25 +40,27 @@
     --spacing-lg: 24px;
     --spacing-xl: 32px;
     --spacing-2xl: 48px;
-    
+
     /* Border radius */
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
     --radius-xl: 24px;
     --radius-full: 9999px;
-    
+
     /* Transitions */
     --transition-fast: 150ms ease;
     --transition-normal: 250ms ease;
     --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
-    
+
     /* Typography */
     --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* Reset & Base */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
@@ -68,6 +70,9 @@ html {
     font-size: 16px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
 }
 
 body {
@@ -75,8 +80,12 @@ body {
     background: var(--bg-dark);
     color: var(--text-primary);
     line-height: 1.5;
-    min-height: 100vh;
-    overflow-x: hidden;
+    height: 100%;
+    width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    overflow: hidden;
 }
 
 /* ========================================
@@ -128,9 +137,19 @@ body {
 }
 
 @keyframes float {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    33% { transform: translate(50px, 30px) scale(1.1); }
-    66% { transform: translate(-30px, 50px) scale(0.9); }
+
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    33% {
+        transform: translate(50px, 30px) scale(1.1);
+    }
+
+    66% {
+        transform: translate(-30px, 50px) scale(0.9);
+    }
 }
 
 .auth-container {
@@ -154,6 +173,7 @@ body {
         opacity: 0;
         transform: translateY(20px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -169,8 +189,15 @@ body {
 }
 
 @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
 }
 
 .logo svg {
@@ -412,9 +439,21 @@ body {
 }
 
 @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    20%, 60% { transform: translateX(-5px); }
-    40%, 80% { transform: translateX(5px); }
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    20%,
+    60% {
+        transform: translateX(-5px);
+    }
+
+    40%,
+    80% {
+        transform: translateX(5px);
+    }
 }
 
 /* Features */
@@ -443,6 +482,8 @@ body {
 
 .app-page {
     height: 100vh;
+    height: 100dvh;
+    /* Dynamic viewport height for mobile */
     overflow: hidden;
 }
 
@@ -1124,6 +1165,7 @@ body {
         opacity: 0;
         transform: translateY(10px) scale(0.98);
     }
+
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -1241,10 +1283,14 @@ body {
 }
 
 @keyframes typingDot {
-    0%, 60%, 100% {
+
+    0%,
+    60%,
+    100% {
         transform: translateY(0);
         opacity: 0.5;
     }
+
     30% {
         transform: translateY(-4px);
         opacity: 1;
@@ -1397,6 +1443,7 @@ body {
         opacity: 0;
         transform: translateX(100%);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -1551,6 +1598,7 @@ body {
     from {
         opacity: 0;
     }
+
     to {
         opacity: 1;
     }
@@ -1571,6 +1619,7 @@ body {
         opacity: 0;
         transform: translateY(20px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -1791,8 +1840,8 @@ body {
     .chat-active {
         display: flex;
         flex-direction: column;
-        height: 100vh;
-        height: 100dvh; /* Dynamic viewport height for mobile */
+        height: 100%;
+        /* Use 100% because body is fixed */
     }
 
     .messages-container {
@@ -1802,12 +1851,15 @@ body {
     }
 
     .message-input-container {
-        position: relative;
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        right: 0;
         padding: var(--spacing-sm) var(--spacing-md);
         background: var(--bg-card);
         border-top: 1px solid var(--border-subtle);
-        /* Remove any bottom margin/padding that pushes it down */
         margin-bottom: 0;
+        z-index: 50;
         padding-bottom: max(var(--spacing-sm), env(safe-area-inset-bottom));
     }
 
