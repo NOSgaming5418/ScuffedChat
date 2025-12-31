@@ -94,6 +94,8 @@ func getContentType(path string) string {
 		return "font/woff2"
 	case ".ttf":
 		return "font/ttf"
+	case ".mp3":
+		return "audio/mpeg"
 	default:
 		return "text/plain"
 	}
