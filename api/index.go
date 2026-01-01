@@ -6,10 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"scuffedsnap/pkg/push"
 )
 
 // Handler is the serverless function entry point for Vercel
 func Handler(w http.ResponseWriter, r *http.Request) {
+	// Initialize push if not already done (it handles singleton/checks internally or we call it)
+	// Actually for Vercel functions, Init might run once per cold start.
+	push.InitPush()
+
 	// Set CORS headers for all requests
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -27,8 +33,27 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		config := map[string]string{
 			"supabaseUrl":     os.Getenv("SUPABASE_URL"),
 			"supabaseAnonKey": os.Getenv("SUPABASE_ANON_KEY"),
+			"vapidPublicKey":  push.GetVapidPublicKey(),
 		}
 		json.NewEncoder(w).Encode(config)
+		return
+	}
+
+	// Webhook endpoint for Supabase
+	if r.URL.Path == "/api/notify" {
+		push.HandleNotify(w, r)
+		return
+	}
+
+	// TEMPORARY: Debug endpoint
+	if r.URL.Path == "/api/debug-keys" {
+		w.Header().Set("Content-Type", "application/json")
+		keys := map[string]string{
+			"NOTE":              "COPY THESE VALUES TO YOUR VERCEL ENVIRONMENT VARIABLES IMMEDIATELY",
+			"VAPID_PRIVATE_KEY": push.GetVapidPrivateKey(),
+			"VAPID_PUBLIC_KEY":  push.GetVapidPublicKey(),
+		}
+		json.NewEncoder(w).Encode(keys)
 		return
 	}
 

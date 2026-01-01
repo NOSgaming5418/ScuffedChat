@@ -12,6 +12,10 @@
       "dest": "/api/index.go"
     },
     {
+      "src": "/api/debug-keys",
+      "dest": "/api/index.go"
+    },
+    {
       "src": "/static/(.*)",
       "dest": "/static/$1"
     },

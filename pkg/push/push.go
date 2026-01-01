@@ -1,4 +1,4 @@
-package main
+package push
 
 import (
 	"encoding/json"
@@ -9,7 +9,6 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
-	"github.com/gorilla/websocket"
 )
 
 var (
@@ -25,29 +24,20 @@ type PushSubscriptionStruct struct {
 	} `json:"keys"`
 }
 
-type RealtimeMessage struct {
-	Event   string `json:"event"`
-	Payload struct {
-		Type   string `json:"type"` // "INSERT"
-		Record struct {
-			ID         string    `json:"id"`
-			SenderID   string    `json:"sender_id"`
-			ReceiverID string    `json:"receiver_id"`
-			Content    string    `json:"content"`
-			Type       string    `json:"type"`
-			CreatedAt  time.Time `json:"created_at"`
-		} `json:"record"`
-	} `json:"payload"`
-}
-
 type VapidKeys struct {
 	PrivateKey string `json:"privateKey"`
 	PublicKey  string `json:"publicKey"`
 }
 
-func InitPush() {
-	// Try to load keys from .env or file, otherwise generate
+type WebhookPayload struct {
+	Type   string                 `json:"type"`
+	Table  string                 `json:"table"`
+	Record map[string]interface{} `json:"record"`
+	Schema string                 `json:"schema"`
+}
 
+// Initialize Push Notifications
+func InitPush() {
 	// Check env first
 	vapidPrivateKey = os.Getenv("VAPID_PRIVATE_KEY")
 	vapidPublicKey = os.Getenv("VAPID_PUBLIC_KEY")
@@ -122,149 +112,48 @@ func GetVapidPublicKey() string {
 	return vapidPublicKey
 }
 
-func StartRealtimeListener() {
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	// Use Service Role Key for Realtime if available to bypass RLS
-	anonKey := os.Getenv("SUPABASE_ANON_KEY")
-	serviceKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
-	token := anonKey
-	if serviceKey != "" {
-		token = serviceKey
-		log.Println("🔑 Using Service Role Key for Realtime (RLS Bypass)")
-	} else {
-		log.Println("⚠️  WARNING: Service Role Key missing. Realtime listener may fail to see new messages due to RLS.")
-	}
-
-	if supabaseURL == "" || token == "" {
-		log.Println("❌ Supabase URL or Key missing, Realtime listener disabled")
-		return
-	}
-
-	// Construct WebSocket URL
-	wsURL := fmt.Sprintf("%s/realtime/v1/websocket?apikey=%s&vsn=1.0.0", supabaseURL, anonKey) // Connection auth often needs anon key in query param, but join payload needs auth token
-	// Actually, the apikey in URL is usually the anon key key. Authentication happens in the channel join or access_token message.
-	// But let's try using the token in URL too if anon fails.
-
-	// Replace https:// with wss://
-	if len(wsURL) > 8 && wsURL[:8] == "https://" {
-		wsURL = "wss://" + wsURL[8:]
-	}
-
-	for {
-		connectAndListen(wsURL, token)
-		log.Println("Realtime disconnected, retrying in 5 seconds...")
-		time.Sleep(5 * time.Second)
-	}
+func GetVapidPrivateKey() string {
+	return vapidPrivateKey
 }
 
-func connectAndListen(wsURL, token string) {
-	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		log.Println("Realtime connect error:", err)
-		return
-	}
-	defer c.Close()
-
-	log.Println("✅ Connected to Supabase Realtime")
-
-	// 2. Define subscription config for INSERT on messages
-	// The payload for subscription
-	config := map[string]interface{}{
-		"access_token": token, // Pass the token (Service Role Key) here for auth/RLS bypass
-		"user_token":   token, // Include both just in case
-		"config": map[string]interface{}{
-			"postgres_changes": []map[string]interface{}{
-				{
-					"event":  "INSERT",
-					"schema": "public",
-					"table":  "messages",
-				},
-			},
-		},
-	}
-
-	// 1. Join with config
-	// Channel name can be anything for broadcast/presence, but for postgres_changes we typically use "realtime:public" or similar?
-	// Actually "room_1" is fine as long as we send the config.
-	channelName := "room_1"
-
-	// Correct format: [Ref, Ref, Topic, Event, Payload]
-	if err := c.WriteJSON([]interface{}{"1", "1", channelName, "phx_join", config}); err != nil {
-		log.Println("Join error:", err)
+// HandleNotify handles the Webhook request from Supabase
+func HandleNotify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	log.Printf("Listening for new messages on channel %s...", channelName)
+	// Secret validation (Optional but recommended)
+	// serviceRoleKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
+	// if r.Header.Get("Authorization") != "Bearer "+serviceRoleKey {
+	// 	// Note: Supabase Webhooks might not send this header by default unless configured
+	// }
 
-	// Start heartbeat
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := c.WriteJSON([]interface{}{nil, "5", "phoenix", "heartbeat", map[string]interface{}{}}); err != nil {
-				return
-			}
-		}
-	}()
-
-	for {
-		_, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("Read error:", err)
-			return
-		}
-
-		// Parse message
-		// Format: [join_ref, ref, topic, event, payload]
-		var msg []interface{}
-		if err := json.Unmarshal(message, &msg); err != nil {
-			continue
-		}
-
-		if len(msg) < 5 {
-			continue
-		}
-
-		event, ok := msg[3].(string)
-		if !ok {
-			continue
-		}
-
-		if event == "postgres_changes" {
-			// Handle change
-			payloadMap, ok := msg[4].(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			data, ok := payloadMap["data"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			// Check if it's INSERT
-			eventType, _ := data["type"].(string)
-			if eventType != "INSERT" {
-				continue
-			}
-
-			record, ok := data["record"].(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			handleNewMessage(record)
-		}
+	var payload WebhookPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Println("Webhook decode error:", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
 	}
+
+	// Filter for INSERT events on messages table
+	if payload.Type != "INSERT" || payload.Table != "messages" {
+		w.WriteHeader(http.StatusOK) // Ignore other events
+		return
+	}
+
+	record := payload.Record
+
+	// Run logic in goroutine to respond quickly to webhook
+	go handleNewMessage(record)
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func handleNewMessage(record map[string]interface{}) {
 	senderID, _ := record["sender_id"].(string)
 	receiverID, _ := record["receiver_id"].(string)
-	// Supabase returns numbers as float64 in generic interface{}, need to be careful if IDs are ints
-	// But in db.go I saw user_id as int64. In Supabase JSON it might come as float64.
-	// However, if the field is defined as UUID or hugeint in Supabase, checking string is safer.
-	// Let's assume content is string.
+
 	content, _ := record["content"].(string)
 	msgType, _ := record["type"].(string)
 
@@ -285,8 +174,7 @@ func handleNewMessage(record map[string]interface{}) {
 		return
 	}
 
-	log.Printf("📩 New message for %s from %s", receiverID, senderID)
-
+	log.Printf("📩 Webhook: New message for %s from %s", receiverID, senderID)
 	// Retrieve subscriptions for receiverID from Supabase
 	subscriptions, err := getSubscriptionsFromSupabase(receiverID)
 	if err != nil {
@@ -302,9 +190,7 @@ func handleNewMessage(record map[string]interface{}) {
 func getSubscriptionsFromSupabase(userID string) ([]PushSubscriptionStruct, error) {
 	supabaseURL := os.Getenv("SUPABASE_URL")
 	anonKey := os.Getenv("SUPABASE_ANON_KEY")
-	// Use Service Role key if available to bypass RLS, otherwise anon key might work if RLS allows public read (unlikely)
-	// IMPORTANT: RLS policy usually restricts reading others' subscriptions.
-	// Ideally we need SERVICE_ROLE_KEY.
+	// Use Service Role key if available to bypass RLS
 	serviceKey := os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
 	key := anonKey
 	if serviceKey != "" {

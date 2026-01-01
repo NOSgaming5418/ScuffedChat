@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 
+	"scuffedsnap/pkg/push"
+
 	"github.com/joho/godotenv"
 )
 
@@ -22,10 +24,7 @@ func main() {
 	}
 
 	// Initialize Push Service
-	InitPush()
-
-	// Start Realtime Listener in background
-	go StartRealtimeListener()
+	push.InitPush()
 
 	// Static files
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
@@ -36,22 +35,22 @@ func main() {
 		config := map[string]string{
 			"supabaseUrl":     os.Getenv("SUPABASE_URL"),
 			"supabaseAnonKey": os.Getenv("SUPABASE_ANON_KEY"),
-			"vapidPublicKey":  GetVapidPublicKey(),
+			"vapidPublicKey":  push.GetVapidPublicKey(),
 		}
 		json.NewEncoder(w).Encode(config)
 	})
+
+	// Webhook endpoint for Supabase
+	http.HandleFunc("/api/notify", push.HandleNotify)
 
 	// TEMPORARY: Debug endpoint to get VAPID keys for setup
 	http.HandleFunc("/api/debug-keys", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// Only allow looking at this if we are running in an environment where we might need to debug
-		// For now, open to all so user can just grab it.
-
 		keys := map[string]string{
 			"NOTE":              "COPY THESE VALUES TO YOUR VERCEL ENVIRONMENT VARIABLES IMMEDIATELY, THEN REMOVE THIS ENDPOINT",
-			"VAPID_PRIVATE_KEY": vapidPrivateKey,
-			"VAPID_PUBLIC_KEY":  vapidPublicKey,
+			"VAPID_PRIVATE_KEY": push.GetVapidPrivateKey(),
+			"VAPID_PUBLIC_KEY":  push.GetVapidPublicKey(),
 		}
 		json.NewEncoder(w).Encode(keys)
 	})
