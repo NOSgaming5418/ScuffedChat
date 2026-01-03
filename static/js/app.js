@@ -24,6 +24,8 @@ const NotificationManager = {
     customSoundLoaded: false,
     enabled: true,
     soundPath: '/static/sounds/notification.mp3',
+    silentLoopNode: null,
+    isKeepingAlive: false,
 
     init() {
         // Initialize on first user interaction for mobile compatibility
@@ -32,6 +34,8 @@ const NotificationManager = {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 // Try to load custom sound file
                 this.loadCustomSound();
+                // Start silent loop for iOS background support
+                this.startSilentLoop();
             } catch (e) {
                 console.warn('AudioContext not supported:', e);
             }
@@ -44,6 +48,46 @@ const NotificationManager = {
             this.audioElement.preload = 'auto';
             // Attempt to load the audio
             this.audioElement.load();
+        }
+    },
+
+    // Keep audio context alive on iOS with silent audio loop
+    startSilentLoop() {
+        if (!this.audioContext || this.isKeepingAlive) return;
+        
+        try {
+            // Create a very quiet oscillator that loops forever
+            // This keeps the audio context active on iOS
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+            
+            // Set to essentially silent (0.0001 is very quiet)
+            gainNode.gain.value = 0.0001;
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            oscillator.frequency.value = 20; // Very low frequency, nearly inaudible
+            oscillator.start();
+            
+            this.silentLoopNode = oscillator;
+            this.isKeepingAlive = true;
+            
+            console.log('🔊 iOS background audio mode enabled - audio context will stay alive');
+        } catch (e) {
+            console.warn('Could not start silent loop:', e);
+        }
+    },
+
+    stopSilentLoop() {
+        if (this.silentLoopNode) {
+            try {
+                this.silentLoopNode.stop();
+                this.silentLoopNode = null;
+                this.isKeepingAlive = false;
+            } catch (e) {
+                console.warn('Error stopping silent loop:', e);
+            }
         }
     },
 
