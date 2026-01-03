@@ -20,6 +20,7 @@ const onlineUsers = new Map();
 const NotificationManager = {
     audioContext: null,
     audioBuffer: null,
+    audioElement: null,
     customSoundLoaded: false,
     enabled: true,
     soundPath: '/static/sounds/notification.mp3',
@@ -35,6 +36,15 @@ const NotificationManager = {
                 console.warn('AudioContext not supported:', e);
             }
         }
+        
+        // Also create HTML5 Audio element for mobile fallback
+        if (!this.audioElement) {
+            this.audioElement = new Audio(this.soundPath);
+            this.audioElement.volume = 0.5;
+            this.audioElement.preload = 'auto';
+            // Attempt to load the audio
+            this.audioElement.load();
+        }
     },
 
     async loadCustomSound() {
@@ -49,7 +59,7 @@ const NotificationManager = {
                 console.log('Custom notification sound loaded successfully');
             }
         } catch (e) {
-            console.log('Custom sound not found, using generated sound:', e.message);
+            console.log('Custom sound not found, using fallback:', e.message);
         }
     },
 
@@ -57,6 +67,22 @@ const NotificationManager = {
         if (!this.enabled) return;
 
         try {
+            // Mobile-first approach: try HTML5 Audio first (more reliable on mobile)
+            if (this.audioElement) {
+                try {
+                    this.audioElement.currentTime = 0;
+                    const playPromise = this.audioElement.play();
+                    if (playPromise !== undefined) {
+                        await playPromise;
+                        console.log('Notification sound played via Audio element');
+                        return; // Success! No need to try other methods
+                    }
+                } catch (audioError) {
+                    console.log('Audio element play failed, trying AudioContext:', audioError.message);
+                }
+            }
+
+            // Fallback to AudioContext (for desktop or if Audio element failed)
             // Initialize if needed
             if (!this.audioContext) {
                 this.init();
@@ -77,10 +103,11 @@ const NotificationManager = {
                 source.connect(gainNode);
                 gainNode.connect(this.audioContext.destination);
                 source.start();
+                console.log('Notification sound played via AudioContext');
                 return;
             }
 
-            // Fallback: Create a pleasant notification sound using oscillators
+            // Last fallback: Create a pleasant notification sound using oscillators
             const ctx = this.audioContext;
             const now = ctx.currentTime;
 
@@ -107,6 +134,7 @@ const NotificationManager = {
             gain2.connect(ctx.destination);
             osc2.start(now + 0.1);
             osc2.stop(now + 0.3);
+            console.log('Notification sound played via oscillator');
 
         } catch (e) {
             console.warn('Failed to play notification sound:', e);
@@ -117,6 +145,16 @@ const NotificationManager = {
 // Initialize audio on first user interaction
 document.addEventListener('click', () => NotificationManager.init(), { once: true });
 document.addEventListener('touchstart', () => NotificationManager.init(), { once: true });
+
+// Listen for messages from service worker to play sound even when in background
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'PLAY_NOTIFICATION_SOUND') {
+            console.log('Service worker requested sound play');
+            NotificationManager.playNotificationSound();
+        }
+    });
+}
 
 // Wait for Supabase to be initialized before running app
 if (window.supabaseClient) {
