@@ -7,6 +7,9 @@ self.addEventListener('push', function(event) {
             icon: '/static/faviconV2.png',
             badge: '/static/faviconV2.png',
             vibrate: [100, 50, 100],
+            sound: '/static/sounds/notification.mp3',
+            requireInteraction: false,
+            silent: false,
             data: {
                 url: payload.url || '/'
             }
