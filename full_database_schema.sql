@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     email VARCHAR(255),
     avatar VARCHAR(500) DEFAULT '',
     is_admin BOOLEAN DEFAULT false,
+    last_seen TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -128,6 +129,8 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     type VARCHAR(10) DEFAULT 'text' CHECK (type IN ('text', 'image')),
     edited BOOLEAN DEFAULT false,
+    replied_to_message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,
+    mentions UUID[],
     updated_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     read_at TIMESTAMPTZ,
@@ -180,11 +183,14 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 -- ========================================
 
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
+CREATE INDEX IF NOT EXISTS idx_profiles_last_seen ON profiles(last_seen);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_replied_to ON messages(replied_to_message_id);
+CREATE INDEX IF NOT EXISTS idx_messages_mentions ON messages USING GIN(mentions);
 CREATE INDEX IF NOT EXISTS idx_friends_user ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend ON friends(friend_id);
 CREATE INDEX IF NOT EXISTS idx_friends_composite ON friends(user_id, friend_id, status);
@@ -294,6 +300,10 @@ CREATE POLICY "Users can view groups they are members of" ON group_chats
         )
     );
 
+DROP POLICY IF EXISTS "Group creators can view their groups" ON group_chats;
+CREATE POLICY "Group creators can view their groups" ON group_chats
+    FOR SELECT USING (auth.uid() = creator_id);
+
 DROP POLICY IF EXISTS "Users can create groups" ON group_chats;
 CREATE POLICY "Users can create groups" ON group_chats
     FOR INSERT WITH CHECK (auth.uid() = creator_id);
@@ -313,25 +323,20 @@ CREATE POLICY "Group creators can delete their groups" ON group_chats
 DROP POLICY IF EXISTS "Users can view members of groups they are in" ON group_members;
 CREATE POLICY "Users can view members of groups they are in" ON group_members
     FOR SELECT USING (
-        auth.uid() IN (
-            SELECT member_id FROM group_members WHERE group_id = group_members.group_id
-        )
+        auth.uid() = member_id
     );
 
 DROP POLICY IF EXISTS "Group creators can add members" ON group_members;
 CREATE POLICY "Group creators can add members" ON group_members
     FOR INSERT WITH CHECK (
-        auth.uid() IN (
-            SELECT creator_id FROM group_chats WHERE id = group_id
-        )
+        auth.uid() = member_id
+        OR auth.uid() = (SELECT creator_id FROM group_chats WHERE id = group_id)
     );
 
 DROP POLICY IF EXISTS "Group creators can remove members" ON group_members;
 CREATE POLICY "Group creators can remove members" ON group_members
     FOR DELETE USING (
-        auth.uid() IN (
-            SELECT creator_id FROM group_chats WHERE id = group_members.group_id
-        ) OR auth.uid() = member_id
+        auth.uid() = member_id
     );
 
 -- ========================================

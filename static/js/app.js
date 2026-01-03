@@ -9,6 +9,8 @@ let friends = [];
 let friendRequests = [];
 let disappearingMode = false;
 let messageSubscription = null;
+let replyingToMessage = null; // Track message being replied to
+let mentionAutocomplete = null; // Track mention autocomplete state
 
 // Online status tracking
 const onlineUsers = new Map();
@@ -322,6 +324,16 @@ function setupWebSocket() {
 
     // Connect WebSocket
     window.wsClient.connect();
+    
+    // Start heartbeat to update last_seen (for online status)
+    startOnlineStatusHeartbeat();
+    
+    // When connected, load online friends status
+    window.wsClient.on('connected', async () => {
+        console.log('WebSocket connected, updating online status');
+        await updateLastSeen();
+        await loadOnlineStatus();
+    });
 
     // Listen for online status changes
     window.wsClient.on('online_status', (payload) => {
@@ -344,6 +356,86 @@ function setupWebSocket() {
             updateChatOnlineStatus(online);
         }
     });
+}
+
+// Update last_seen timestamp in database (heartbeat)
+async function updateLastSeen() {
+    if (!currentUser) return;
+    
+    try {
+        await window.supabaseClient
+            .from('profiles')
+            .update({ last_seen: new Date().toISOString() })
+            .eq('id', currentUser.id);
+    } catch (error) {
+        console.error('Failed to update last_seen:', error);
+    }
+}
+
+// Start periodic heartbeat to update last_seen
+function startOnlineStatusHeartbeat() {
+    // Update immediately
+    updateLastSeen();
+    
+    // Update every 30 seconds
+    setInterval(updateLastSeen, 30000);
+    
+    // Update when page becomes visible (tab switching)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            updateLastSeen();
+        }
+    });
+}
+
+// Load online status for friends based on last_seen
+async function loadOnlineStatus() {
+    if (!friends || friends.length === 0) return;
+    
+    try {
+        const friendIds = friends.map(f => f.id);
+        
+        // Consider users online if last_seen within last 2 minutes
+        const onlineThreshold = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+        
+        const { data, error } = await window.supabaseClient
+            .from('profiles')
+            .select('id, last_seen')
+            .in('id', friendIds)
+            .gte('last_seen', onlineThreshold);
+        
+        if (error) throw error;
+        
+        // Update onlineUsers map
+        onlineUsers.clear();
+        if (data) {
+            data.forEach(profile => {
+                onlineUsers.set(profile.id, true);
+            });
+        }
+        
+        // Update UI
+        renderFriends();
+        renderConversations();
+        
+        // Update chat if viewing someone
+        if (currentChat && currentChat.type === 'dm') {
+            const isOnline = onlineUsers.has(currentChat.id);
+            updateChatOnlineStatus(isOnline);
+        }
+        
+    } catch (error) {
+        console.error('Failed to load online status:', error);
+    }
+}
+
+// Periodically refresh online status
+setInterval(loadOnlineStatus, 30000); // Check every 30 seconds
+
+// Fetch online status for all friends from backend
+async function updateOnlineStatusForFriends() {
+    // This function is now replaced by loadOnlineStatus
+    await loadOnlineStatus();
 }
 
 // Update chat header online status
@@ -527,6 +619,13 @@ function setupEventListeners() {
         document.getElementById('chat-active').classList.add('hidden');
         document.getElementById('sidebar').classList.remove('hidden');
         currentChat = null;
+    });
+
+    // Chat user info click (open group settings for groups)
+    document.getElementById('chat-user-info').addEventListener('click', () => {
+        if (currentChat && currentChat.type === 'group') {
+            openGroupSettings(currentChat.id);
+        }
     });
 
     // Toggle disappearing messages
@@ -736,6 +835,17 @@ async function sendMessage() {
             messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         }
 
+        // Add reply context if replying
+        if (replyingToMessage) {
+            messageData.replied_to_message_id = replyingToMessage.id;
+        }
+
+        // Extract @mentions from content
+        const mentions = extractMentions(content);
+        if (mentions.length > 0) {
+            messageData.mentions = mentions;
+        }
+
         const { data: message, error } = await window.supabaseClient
             .from('messages')
             .insert(messageData)
@@ -746,6 +856,9 @@ async function sendMessage() {
 
         appendMessage(message, false);
         input.value = '';
+        
+        // Clear reply context
+        clearReplyContext();
 
         // Scroll to bottom
         const container = document.getElementById('messages-container');
@@ -1249,12 +1362,28 @@ function createMessageHTML(message, received) {
     const hasExpiry = message.expires_at != null;
     const isImage = message.type === 'image';
     const isEdited = message.edited || false;
+    const hasReply = message.replied_to_message_id != null;
 
     let contentHTML;
     if (isImage) {
         contentHTML = `<img src="${escapeHtml(message.content)}" alt="Image" class="message-image" loading="lazy" onclick="openImageViewer('${escapeHtml(message.content)}')">`;
     } else {
-        contentHTML = `<div class="message-content">${escapeHtml(message.content)}</div>`;
+        // Apply mention highlighting
+        const highlightedContent = highlightMentions(escapeHtml(message.content));
+        contentHTML = `<div class="message-content">${highlightedContent}</div>`;
+    }
+    
+    // Reply preview HTML (if message is a reply)
+    let replyHTML = '';
+    if (hasReply) {
+        // Note: In a full implementation, you'd fetch the replied-to message
+        // For now, we'll show a simple indicator
+        replyHTML = `
+            <div class="message-reply-preview">
+                <div class="reply-indicator"></div>
+                <div class="reply-text">Replying to a message</div>
+            </div>
+        `;
     }
 
     return `
@@ -1265,6 +1394,7 @@ function createMessageHTML(message, received) {
              ontouchend="handleLongPressEnd()"
              ontouchmove="handleLongPressEnd()">
             <div class="message-bubble">
+                ${replyHTML}
                 ${contentHTML}
                 <div class="message-time">
                     ${isEdited ? '<span class="message-edited">(edited)</span>' : ''}
@@ -1458,8 +1588,6 @@ let longPressTimer = null;
 function showMessageContextMenu(event, messageId, isSentByMe) {
     event.preventDefault();
 
-    if (!isSentByMe) return; // Only show context menu for messages you sent
-
     selectedMessageId = messageId;
     const menu = document.getElementById('message-context-menu');
 
@@ -1471,16 +1599,28 @@ function showMessageContextMenu(event, messageId, isSentByMe) {
     menu.style.top = event.pageY + 'px';
 
     // Set up button handlers
+    const replyBtn = document.getElementById('reply-message-btn');
     const deleteBtn = document.getElementById('delete-message-btn');
     const editBtn = document.getElementById('edit-message-btn');
 
-    deleteBtn.onclick = () => deleteMessage(messageId);
-    editBtn.onclick = () => editMessage(messageId);
+    replyBtn.onclick = () => {
+        replyToMessage(messageId);
+        menu.style.display = 'none';
+    };
+    
+    // Only show edit/delete for own messages
+    if (isSentByMe) {
+        deleteBtn.style.display = 'flex';
+        editBtn.style.display = 'flex';
+        deleteBtn.onclick = () => deleteMessage(messageId);
+        editBtn.onclick = () => editMessage(messageId);
+    } else {
+        deleteBtn.style.display = 'none';
+        editBtn.style.display = 'none';
+    }
 }
 
 function handleLongPressStart(event, messageId, isSentByMe) {
-    if (!isSentByMe) return;
-
     longPressTimer = setTimeout(() => {
         // Trigger context menu on long press
         showMessageContextMenu(event, messageId, isSentByMe);
@@ -1911,6 +2051,351 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Refresh conversations to update display names
                 await loadConversations();
+
+                showToast('Profile updated successfully', 'success');
+                closeProfileModal();
+
+            } catch (error) {
+                console.error('Failed to update profile:', error);
+                errorDiv.textContent = 'Failed to update profile: ' + error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        };
+    }
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeProfileModal() {
+    const modal = document.getElementById('profile-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+window.openProfileModal = openProfileModal;
+window.closeProfileModal = closeProfileModal;
+
+// ========================================
+// REPLY FUNCTIONALITY
+// ========================================
+
+function replyToMessage(messageId) {
+    // Find the message
+    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
+    if (!messageElement) return;
+
+    const contentDiv = messageElement.querySelector('.message-content, .message-image');
+    const senderDiv = messageElement.querySelector('.message-sender');
+    
+    let content = '';
+    let type = 'text';
+    
+    if (contentDiv && contentDiv.classList.contains('message-content')) {
+        content = contentDiv.textContent;
+    } else if (contentDiv && contentDiv.classList.contains('message-image')) {
+        content = '[Image]';
+        type = 'image';
+    }
+    
+    const sender = senderDiv ? senderDiv.textContent : 'Unknown';
+    
+    replyingToMessage = {
+        id: messageId,
+        sender: sender,
+        content: content.substring(0, 50), // Truncate to 50 chars
+        type: type
+    };
+    
+    showReplyPreview();
+    
+    // Focus input
+    document.getElementById('message-input').focus();
+}
+
+function showReplyPreview() {
+    if (!replyingToMessage) return;
+    
+    let previewHtml = `
+        <div class=\"reply-preview\" id=\"reply-preview\">
+            <div class=\"reply-preview-content\">
+                <div class=\"reply-preview-label\">Replying to ${escapeHtml(replyingToMessage.sender)}</div>
+                <div class=\"reply-preview-text\">${escapeHtml(replyingToMessage.content)}</div>
+            </div>
+            <button class=\"reply-preview-close\" onclick=\"clearReplyContext()\">
+                <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">
+                    <line x1=\"18\" y1=\"6\" x2=\"6\" y2=\"18\" />
+                    <line x1=\"6\" y1=\"6\" x2=\"18\" y2=\"18\" />
+                </svg>
+            </button>
+        </div>
+    `;
+    
+    // Add to input container
+    const inputContainer = document.querySelector('.message-input-wrapper');
+    const existingPreview = document.getElementById('reply-preview');
+    if (existingPreview) {
+        existingPreview.remove();
+    }
+    
+    inputContainer.insertAdjacentHTML('beforebegin', previewHtml);
+}
+
+function clearReplyContext() {
+    replyingToMessage = null;
+    const preview = document.getElementById('reply-preview');
+    if (preview) {
+        preview.remove();
+    }
+}
+
+window.clearReplyContext = clearReplyContext;
+window.replyToMessage = replyToMessage;
+
+// ========================================
+// @MENTIONS FUNCTIONALITY
+// ========================================
+
+function extractMentions(text) {
+    // Extract all @username patterns
+    const mentionPattern = /@([a-zA-Z0-9_]+)/g;
+    const matches = text.matchAll(mentionPattern);
+    const mentionedUsernames = [];
+    
+    for (const match of matches) {
+        mentionedUsernames.push(match[1]);
+    }
+    
+    if (mentionedUsernames.length === 0) return [];
+    
+    // Get member IDs (for now return empty, will be populated by backend or separate lookup)
+    // In a full implementation, you'd look up these usernames and get their IDs
+    return []; // Placeholder - implement username to ID lookup if needed
+}
+
+function highlightMentions(text) {
+    // Replace @username with highlighted version
+    return text.replace(/@([a-zA-Z0-9_]+)/g, '<span class=\"mention\">@$1</span>');
+}
+
+// ========================================
+// GROUP SETTINGS MODAL
+// ========================================
+
+async function openGroupSettings(groupId) {
+    const group = groups.find(g => `${g.id}` === `${groupId}`);
+    if (!group) return;
+    
+    // Load group members
+    try {
+        const { data: memberData, error } = await window.supabaseClient
+            .from('group_members')
+            .select('member:profiles(*)')
+            .eq('group_id', groupId);
+        
+        if (error) throw error;
+        
+        const members = memberData.map(m => m.member);
+        
+        showGroupSettingsModal(group, members);
+    } catch (error) {
+        console.error('Failed to load group members:', error);
+        showToast('Failed to load group settings', 'error');
+    }
+}
+
+function showGroupSettingsModal(group, members) {
+    const modal = document.getElementById('group-settings-modal');
+    if (!modal) {
+        console.error('Group settings modal not found');
+        return;
+    }
+    
+    // Populate modal
+    document.getElementById('group-settings-name').value = group.name;
+    document.getElementById('current-group-id').value = group.id;
+    
+    // Render members list
+    const membersList = document.getElementById('group-members-list');
+    membersList.innerHTML = members.map(member => `
+        <div class=\"group-member-item\">
+            <div class=\"member-avatar\">${member.username.charAt(0).toUpperCase()}</div>
+            <span class=\"member-username\">${escapeHtml(member.username)}</span>
+            ${member.id !== group.creator_id && member.id !== currentUser.id ? `
+                <button class=\"btn-remove-member\" onclick=\"removeMemberFromGroup('${group.id}', '${member.id}')\">Remove</button>
+            ` : ''}
+            ${member.id === group.creator_id ? '<span class=\"member-badge\">Creator</span>' : ''}
+        </div>
+    `).join('');
+    
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeGroupSettingsModal() {
+    const modal = document.getElementById('group-settings-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+}
+
+async function updateGroupName() {
+    const groupId = document.getElementById('current-group-id').value;
+    const newName = document.getElementById('group-settings-name').value.trim();
+    
+    if (!newName || newName.length < 1 || newName.length > 100) {
+        showToast('Group name must be 1-100 characters', 'error');
+        return;
+    }
+    
+    try {
+        const { error } = await window.supabaseClient
+            .from('group_chats')
+            .update({ name: newName, updated_at: new Date().toISOString() })
+            .eq('id', groupId)
+            .eq('creator_id', currentUser.id); // Only creator can rename
+        
+        if (error) throw error;
+        
+        // Update local groups array
+        const group = groups.find(g => `${g.id}` === `${groupId}`);\n        if (group) {\n            group.name = newName;\n        }
+        
+        // Update UI
+        renderGroups();
+        if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
+            document.getElementById('chat-username').textContent = newName;
+        }
+        
+        showToast('Group name updated', 'success');
+        closeGroupSettingsModal();
+    } catch (error) {
+        console.error('Failed to update group name:', error);
+        showToast('Failed to update group name', 'error');
+    }
+}
+
+async function addMemberToGroup() {
+    const groupId = document.getElementById('current-group-id').value;
+    const username = document.getElementById('add-member-input').value.trim();
+    
+    if (!username) return;
+    
+    try {
+        // Find user by username
+        const { data: user, error: findError } = await window.supabaseClient
+            .from('profiles')
+            .select('*')
+            .eq('username', username)
+            .single();
+        
+        if (findError || !user) {
+            showToast('User not found', 'error');
+            return;
+        }
+        
+        // Check if already a member
+        const { data: existing } = await window.supabaseClient
+            .from('group_members')
+            .select('*')
+            .eq('group_id', groupId)
+            .eq('member_id', user.id)
+            .single();
+        
+        if (existing) {
+            showToast('User is already a member', 'error');
+            return;
+        }
+        
+        // Add member
+        const { error: insertError } = await window.supabaseClient
+            .from('group_members')
+            .insert({
+                group_id: groupId,
+                member_id: user.id,
+                joined_at: new Date().toISOString()
+            });
+        
+        if (insertError) throw insertError;
+        
+        showToast('Member added', 'success');
+        document.getElementById('add-member-input').value = '';
+        
+        // Reload modal
+        closeGroupSettingsModal();
+        setTimeout(() => openGroupSettings(groupId), 300);
+        
+    } catch (error) {
+        console.error('Failed to add member:', error);
+        showToast('Failed to add member', 'error');
+    }
+}
+
+async function removeMemberFromGroup(groupId, memberId) {
+    if (!confirm('Remove this member from the group?')) return;
+    
+    try {
+        const { error } = await window.supabaseClient
+            .from('group_members')
+            .delete()
+            .eq('group_id', groupId)
+            .eq('member_id', memberId);
+        
+        if (error) throw error;
+        
+        showToast('Member removed', 'success');
+        
+        // Reload modal
+        closeGroupSettingsModal();
+        setTimeout(() => openGroupSettings(groupId), 300);
+        
+    } catch (error) {
+        console.error('Failed to remove member:', error);
+        showToast('Failed to remove member', 'error');
+    }
+}
+
+async function deleteGroup() {
+    const groupId = document.getElementById('current-group-id').value;
+    
+    if (!confirm('Are you sure you want to delete this group? This cannot be undone.')) return;
+    
+    try {
+        // Delete group (cascade will handle members and messages)
+        const { error } = await window.supabaseClient
+            .from('group_chats')
+            .delete()
+            .eq('id', groupId)
+            .eq('creator_id', currentUser.id); // Only creator can delete
+        
+        if (error) throw error;
+        
+        // Remove from local array
+        groups = groups.filter(g => `${g.id}` !== `${groupId}`);\n        renderGroups();
+        
+        // Close chat if currently open
+        if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
+            document.getElementById('btn-back').click();
+        }
+        
+        showToast('Group deleted', 'success');
+        closeGroupSettingsModal();
+        
+    } catch (error) {
+        console.error('Failed to delete group:', error);
+        showToast('Failed to delete group', 'error');
+    }
+}
+
+window.openGroupSettings = openGroupSettings;
+window.closeGroupSettingsModal = closeGroupSettingsModal;
+window.updateGroupName = updateGroupName;
+window.addMemberToGroup = addMemberToGroup;
+window.removeMemberFromGroup = removeMemberFromGroup;
+window.deleteGroup = deleteGroup;
 
                 closeProfileEditModal();
                 showToast('Profile updated successfully', 'success');

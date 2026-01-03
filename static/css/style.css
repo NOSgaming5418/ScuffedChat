@@ -2087,3 +2087,170 @@ body {
     background: var(--primary);
     color: var(--bg-dark);
 }
+
+/* ========================================
+   Reply & Mention Styles
+   ======================================== */
+
+.reply-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+}
+
+.reply-preview-content {
+    flex: 1;
+}
+
+.reply-preview-label {
+    font-size: 0.75rem;
+    color: var(--primary);
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.reply-preview-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reply-preview-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-fast);
+}
+
+.reply-preview-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.reply-preview-close svg {
+    width: 16px;
+    height: 16px;
+}
+
+.message-reply-preview {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid var(--primary);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.reply-indicator {
+    width: 2px;
+    height: 100%;
+    background: var(--primary);
+}
+
+.reply-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mention {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent-blue);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* ========================================
+   Group Settings Modal Styles
+   ======================================== */
+
+.group-member-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    transition: var(--transition-fast);
+}
+
+.group-member-item:hover {
+    background: var(--bg-input-focus);
+}
+
+.member-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: var(--bg-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.member-username {
+    flex: 1;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.member-badge {
+    padding: 4px 10px;
+    background: var(--primary);
+    color: var(--bg-dark);
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.btn-remove-member {
+    padding: 6px 12px;
+    background: var(--accent-red);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-remove-member:hover {
+    background: #e63946;
+    transform: translateY(-1px);
+}
+
+.btn-danger {
+    transition: var(--transition-normal);
+}
+
+.btn-danger:hover {
+    background: #e63946 !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 68, 68, 0.4);
+}
