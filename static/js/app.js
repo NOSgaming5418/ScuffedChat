@@ -1929,48 +1929,21 @@ function closeProfileEditModal() {
 window.closeProfileEditModal = closeProfileEditModal;
 window.openProfileEditModal = openProfileEditModal;
 
-// Handle avatar file selection
-document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.getElementById('avatar-upload');
-    if (fileInput) {
-        fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+// ========================================
+// Profile Modal (View/Save)
+// ========================================
 
-            // Check file size (5MB max)
-            if (file.size > 5 * 1024 * 1024) {
-                const errorDiv = document.getElementById('profile-error');
-                errorDiv.textContent = 'Image must be less than 5MB';
-                errorDiv.style.display = 'block';
-                fileInput.value = '';
-                return;
-            }
-
-            // Check file type
-            if (!file.type.startsWith('image/')) {
-                const errorDiv = document.getElementById('profile-error');
-                errorDiv.textContent = 'Please select an image file';
-                errorDiv.style.display = 'block';
-                fileInput.value = '';
-                return;
-            }
-
-            // Preview the image
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const avatarPreview = document.getElementById('avatar-preview-img');
-                const avatarText = document.getElementById('avatar-preview-text');
-                avatarPreview.src = e.target.result;
-                avatarPreview.style.display = 'block';
-                avatarText.style.display = 'none';
-            };
-            reader.readAsDataURL(file);
-        });
+function openProfileModal() {
+    const modal = document.getElementById('profile-modal');
+    if (!modal) {
+        console.warn('Profile modal not found');
+        return;
     }
-
-    // Save profile button
+    
+    // Setup save handler if not already done
     const saveBtn = document.getElementById('save-profile-btn');
-    if (saveBtn) {
+    if (saveBtn && !saveBtn.hasAttribute('data-handler-set')) {
+        saveBtn.setAttribute('data-handler-set', 'true');
         saveBtn.onclick = async () => {
             const username = document.getElementById('edit-username').value.trim();
             const fileInput = document.getElementById('avatar-upload');
@@ -1995,9 +1968,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const file = fileInput.files[0];
                     const fileExt = file.name.split('.').pop();
                     const fileName = `${Date.now()}.${fileExt}`;
-                    const filePath = `${currentUser.id}/${fileName}`; // Upload to user's folder
+                    const filePath = `${currentUser.id}/${fileName}`;
 
-                    // Upload to Supabase Storage
                     const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
                         .from('avatars')
                         .upload(filePath, file, {
@@ -2007,7 +1979,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (uploadError) throw uploadError;
 
-                    // Get public URL
                     const { data: urlData } = window.supabaseClient.storage
                         .from('avatars')
                         .getPublicUrl(filePath);
@@ -2405,19 +2376,4 @@ window.updateGroupName = updateGroupName;
 window.addMemberToGroup = addMemberToGroup;
 window.removeMemberFromGroup = removeMemberFromGroup;
 window.deleteGroup = deleteGroup;
-
-                closeProfileEditModal();
-                showToast('Profile updated successfully', 'success');
-
-            } catch (error) {
-                console.error('Failed to update profile:', error);
-                errorDiv.textContent = 'Failed to save changes. Please try again.';
-                errorDiv.style.display = 'block';
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.textContent = 'Save Changes';
-            }
-        };
-    }
-});
 
