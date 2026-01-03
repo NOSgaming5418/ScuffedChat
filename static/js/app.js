@@ -2262,7 +2262,13 @@ async function updateGroupName() {
         if (error) throw error;
         
         // Update local groups array
-        const group = groups.find(g => `${g.id}` === `${groupId}`);\n        if (group) {\n            group.name = newName;\n        }
+        const group = groups.find(g => `${g.id}` === `${groupId}`);
+        if (group) {
+            group.name = newName;
+        }
+        
+        // Update UI
+        renderGroups();
         
         // Update UI
         renderGroups();
@@ -2374,7 +2380,10 @@ async function deleteGroup() {
         if (error) throw error;
         
         // Remove from local array
-        groups = groups.filter(g => `${g.id}` !== `${groupId}`);\n        renderGroups();
+        groups = groups.filter(g => `${g.id}` !== `${groupId}`);
+        renderGroups();
+        
+        // Close chat if currently open
         
         // Close chat if currently open
         if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
