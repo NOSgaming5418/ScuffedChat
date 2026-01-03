@@ -46,6 +46,15 @@
                     </svg>
                     <span>Chats</span>
                 </button>
+                <button class="nav-tab" data-view="groups">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                    <span>Groups</span>
+                </button>
                 <button class="nav-tab" data-view="friends">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -72,6 +81,29 @@
                         <div class="empty-icon">💬</div>
                         <p>No conversations yet</p>
                         <span>Add friends to start chatting!</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Groups view -->
+            <div class="sidebar-content hidden" id="groups-view">
+                <div class="search-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input type="text" placeholder="Search groups..." id="search-groups">
+                    <button class="btn-add" id="add-group-btn" title="Create group">
+                        <img src="/static/images/yellowplus.png" alt="Add group">
+                    </button>
+                </div>
+                <div class="group-section">
+                    <h3 class="section-title">Groups</h3>
+                    <div class="groups-list" id="groups-list">
+                        <div class="empty-state small">
+                            <p>No groups yet</p>
+                            <span>Create one to start!</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -229,6 +261,60 @@
             </svg>
         </button>
         <img src="" alt="Fullscreen image" id="image-viewer-img" onclick="event.stopPropagation()">
+    </div>
+
+    <!-- Create Group Modal -->
+    <div class="modal-overlay" id="create-group-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Group</h3>
+                <button class="btn-close" onclick="closeCreateGroupModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="group-name-input">Group Name</label>
+                    <input type="text" id="group-name-input" placeholder="Group name" maxlength="100" required>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="group-members-input">Members (usernames, comma separated)</label>
+                    <textarea id="group-members-input" placeholder="alice, bob, charlie" style="width: 100%; min-height: 80px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-family: inherit; resize: vertical;"></textarea>
+                    <small style="color: #666; font-size: 12px;">You will be added automatically</small>
+                </div>
+                <div id="group-error" style="color: #ff4444; margin-top: 10px; display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal-decline" onclick="closeCreateGroupModal()">Cancel</button>
+                <button class="btn-modal-accept" id="create-group-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Message Modal -->
+    <div class="modal-overlay" id="edit-message-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Message</h3>
+                <button class="btn-close" onclick="closeEditMessageModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <textarea id="edit-message-textarea" placeholder="Enter your message..." style="width: 100%; min-height: 120px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-family: inherit; resize: vertical;"></textarea>
+                <div id="edit-error" style="color: #ff4444; margin-top: 10px; display: none;"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal-decline" onclick="closeEditMessageModal()">Cancel</button>
+                <button class="btn-modal-accept" id="edit-message-save-btn">Save</button>
+            </div>
+        </div>
     </div>
 
     <!-- Friend Request Detail Modal -->

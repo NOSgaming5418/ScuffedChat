@@ -123,7 +123,8 @@ END $$;
 CREATE TABLE IF NOT EXISTS messages (
     id BIGSERIAL PRIMARY KEY,
     sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+    group_id BIGINT REFERENCES group_chats(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     type VARCHAR(10) DEFAULT 'text' CHECK (type IN ('text', 'image')),
     edited BOOLEAN DEFAULT false,
@@ -131,6 +132,26 @@ CREATE TABLE IF NOT EXISTS messages (
     expires_at TIMESTAMPTZ,
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create group_chats table
+CREATE TABLE IF NOT EXISTS group_chats (
+    id BIGSERIAL PRIMARY KEY,
+    creator_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    avatar VARCHAR(500),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create group_members table
+CREATE TABLE IF NOT EXISTS group_members (
+    id BIGSERIAL PRIMARY KEY,
+    group_id BIGINT NOT NULL REFERENCES group_chats(id) ON DELETE CASCADE,
+    member_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(group_id, member_id)
 );
 
 -- Create friends table
@@ -161,11 +182,16 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_friends_user ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend ON friends(friend_id);
 CREATE INDEX IF NOT EXISTS idx_friends_composite ON friends(user_id, friend_id, status);
+CREATE INDEX IF NOT EXISTS idx_group_chats_creator ON group_chats(creator_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_member ON group_members(member_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_composite ON group_members(group_id, member_id);
 
 -- ========================================
 -- 3. ENABLE ROW LEVEL SECURITY
@@ -175,6 +201,8 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friends ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
 
 -- ========================================
 -- 4. PROFILES RLS POLICIES
@@ -198,11 +226,29 @@ CREATE POLICY "Users can update their own profile" ON profiles
 
 DROP POLICY IF EXISTS "Users can view their own messages" ON messages;
 CREATE POLICY "Users can view their own messages" ON messages
-    FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+    FOR SELECT USING (
+        auth.uid() = sender_id 
+        OR auth.uid() = receiver_id
+        OR (
+            group_id IS NOT NULL AND auth.uid() IN (
+                SELECT member_id FROM group_members WHERE group_id = messages.group_id
+            )
+        )
+    );
 
 DROP POLICY IF EXISTS "Users can send messages" ON messages;
 CREATE POLICY "Users can send messages" ON messages
-    FOR INSERT WITH CHECK (auth.uid() = sender_id);
+    FOR INSERT WITH CHECK (
+        auth.uid() = sender_id
+        AND (
+            receiver_id IS NOT NULL 
+            OR (
+                group_id IS NOT NULL AND auth.uid() IN (
+                    SELECT member_id FROM group_members WHERE group_id = messages.group_id
+                )
+            )
+        )
+    );
 
 DROP POLICY IF EXISTS "Users can update messages they received (mark as read)" ON messages;
 CREATE POLICY "Users can update messages they received (mark as read)" ON messages
@@ -237,7 +283,59 @@ CREATE POLICY "Users can delete their friendships" ON friends
     FOR DELETE USING (auth.uid() = user_id OR auth.uid() = friend_id);
 
 -- ========================================
--- 7. PUSH NOTIFICATIONS RLS POLICIES
+-- 7. GROUP CHATS RLS POLICIES
+-- ========================================
+
+DROP POLICY IF EXISTS "Users can view groups they are members of" ON group_chats;
+CREATE POLICY "Users can view groups they are members of" ON group_chats
+    FOR SELECT USING (
+        auth.uid() IN (
+            SELECT member_id FROM group_members WHERE group_id = group_chats.id
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can create groups" ON group_chats;
+CREATE POLICY "Users can create groups" ON group_chats
+    FOR INSERT WITH CHECK (auth.uid() = creator_id);
+
+DROP POLICY IF EXISTS "Group creators can update their groups" ON group_chats;
+CREATE POLICY "Group creators can update their groups" ON group_chats
+    FOR UPDATE USING (auth.uid() = creator_id);
+
+DROP POLICY IF EXISTS "Group creators can delete their groups" ON group_chats;
+CREATE POLICY "Group creators can delete their groups" ON group_chats
+    FOR DELETE USING (auth.uid() = creator_id);
+
+-- ========================================
+-- 8. GROUP MEMBERS RLS POLICIES
+-- ========================================
+
+DROP POLICY IF EXISTS "Users can view members of groups they are in" ON group_members;
+CREATE POLICY "Users can view members of groups they are in" ON group_members
+    FOR SELECT USING (
+        auth.uid() IN (
+            SELECT member_id FROM group_members WHERE group_id = group_members.group_id
+        )
+    );
+
+DROP POLICY IF EXISTS "Group creators can add members" ON group_members;
+CREATE POLICY "Group creators can add members" ON group_members
+    FOR INSERT WITH CHECK (
+        auth.uid() IN (
+            SELECT creator_id FROM group_chats WHERE id = group_id
+        )
+    );
+
+DROP POLICY IF EXISTS "Group creators can remove members" ON group_members;
+CREATE POLICY "Group creators can remove members" ON group_members
+    FOR DELETE USING (
+        auth.uid() IN (
+            SELECT creator_id FROM group_chats WHERE id = group_members.group_id
+        ) OR auth.uid() = member_id
+    );
+
+-- ========================================
+-- 9. PUSH NOTIFICATIONS RLS POLICIES
 -- ========================================
 
 DROP POLICY IF EXISTS "Users can view their own subscriptions" ON push_subscriptions;
@@ -258,7 +356,7 @@ CREATE POLICY "Service role can read all subscriptions" ON push_subscriptions
     FOR SELECT USING (true);
 
 -- ========================================
--- 8. ENABLE REALTIME
+-- 10. ENABLE REALTIME
 -- ========================================
 
 DO $$
@@ -269,10 +367,16 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'friends') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE friends;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'group_chats') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE group_chats;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'group_members') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE group_members;
+    END IF;
 END $$;
 
 -- ========================================
--- 9. CREATE STORAGE BUCKET FOR AVATARS
+-- 11. STORAGE BUCKET FOR AVATARS
 -- ========================================
 
 INSERT INTO storage.buckets (id, name, public)
@@ -280,7 +384,7 @@ VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- ========================================
--- 10. STORAGE RLS POLICIES FOR AVATARS
+-- 12. STORAGE RLS POLICIES FOR AVATARS
 -- ========================================
 
 -- Drop existing policies if they exist (to ensure updates)
@@ -320,7 +424,7 @@ USING (
 );
 
 -- ========================================
--- 11. UTILITY FUNCTIONS
+-- 13. UTILITY FUNCTIONS
 -- ========================================
 
 -- Automatic cleanup function for expired messages

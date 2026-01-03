@@ -2,8 +2,9 @@
 
 let currentUser = null;
 let currentUserProfile = null;
-let currentChat = null;
+let currentChat = null; // { type: 'dm' | 'group', id: string, user?: object, group?: object }
 let conversations = [];
+let groups = [];
 let friends = [];
 let friendRequests = [];
 let disappearingMode = false;
@@ -174,6 +175,7 @@ async function initializeApp() {
     // Load initial data
     await Promise.all([
         loadConversations(),
+        loadGroups(),
         loadFriends(),
         loadFriendRequests()
     ]);
@@ -380,22 +382,26 @@ function setupRealtimeSubscription() {
             { event: 'INSERT', schema: 'public', table: 'messages' },
             (payload) => {
                 const message = payload.new;
-                // If message is for current user
-                if (message.receiver_id === currentUser.id || message.sender_id === currentUser.id) {
-                    // Only append if you're NOT the sender (to avoid duplicates)
-                    if (currentChat && (message.sender_id === currentChat.id || message.receiver_id === currentChat.id)) {
-                        if (message.sender_id !== currentUser.id) {
-                            appendMessage(message, true);
-                        }
-                    }
-                    // Reload conversations
-                    loadConversations();
+                const isDirect = message.receiver_id && (message.receiver_id === currentUser.id || message.sender_id === currentUser.id);
+                const isGroup = message.group_id && groups.some(g => g.id === message.group_id);
 
-                    if (message.sender_id !== currentUser.id) {
-                        showToast('New message received!', 'success');
-                        // Play notification sound
-                        NotificationManager.playNotificationSound();
-                    }
+                if (!isDirect && !isGroup) return;
+
+                const chatMatchesCurrent = currentChat && (
+                    (currentChat.type === 'dm' && (message.sender_id === currentChat.id || message.receiver_id === currentChat.id)) ||
+                    (currentChat.type === 'group' && message.group_id === currentChat.id)
+                );
+
+                if (chatMatchesCurrent && message.sender_id !== currentUser.id) {
+                    appendMessage(message, true);
+                }
+
+                // Reload conversation lists
+                loadConversations();
+                loadGroups();
+
+                if (message.sender_id !== currentUser.id) {
+                    NotificationManager.playNotificationSound();
                 }
             }
         )
@@ -417,7 +423,12 @@ function setupRealtimeSubscription() {
             (payload) => {
                 const message = payload.new;
                 // Update message in UI if it's in the current chat
-                if (currentChat && (message.sender_id === currentChat.id || message.receiver_id === currentChat.id)) {
+                const matchesChat = currentChat && (
+                    (currentChat.type === 'dm' && (message.sender_id === currentChat.id || message.receiver_id === currentChat.id)) ||
+                    (currentChat.type === 'group' && message.group_id === currentChat.id)
+                );
+
+                if (matchesChat) {
                     const messageElement = document.querySelector(`[data-message-id="${message.id}"]`);
                     if (messageElement && message.edited) {
                         const contentDiv = messageElement.querySelector('.message-content');
@@ -482,6 +493,7 @@ function setupEventListeners() {
             tab.classList.add('active');
 
             document.getElementById('chats-view').classList.toggle('hidden', view !== 'chats');
+            document.getElementById('groups-view').classList.toggle('hidden', view !== 'groups');
             document.getElementById('friends-view').classList.toggle('hidden', view !== 'friends');
         });
     });
@@ -499,6 +511,15 @@ function setupEventListeners() {
             addFriend();
         }
     });
+
+    // Groups
+    document.getElementById('add-group-btn').addEventListener('click', () => {
+        openCreateGroupModal();
+    });
+    document.getElementById('search-groups').addEventListener('input', (e) => {
+        filterGroups(e.target.value.toLowerCase());
+    });
+    document.getElementById('create-group-btn').addEventListener('click', createGroup);
 
     // Back button (mobile)
     document.getElementById('btn-back').addEventListener('click', () => {
@@ -578,6 +599,23 @@ async function loadConversations() {
     }
 }
 
+async function loadGroups() {
+    try {
+        const { data, error } = await window.supabaseClient
+            .from('group_members')
+            .select('group:group_chats(*)')
+            .eq('member_id', currentUser.id);
+
+        if (error) throw error;
+
+        groups = (data || []).map(entry => entry.group || {});
+
+        renderGroups();
+    } catch (error) {
+        console.error('Failed to load groups:', error);
+    }
+}
+
 async function loadFriends() {
     try {
         const { data, error } = await window.supabaseClient
@@ -622,7 +660,17 @@ async function loadFriendRequests() {
     }
 }
 
-async function loadMessages(partnerId) {
+async function loadMessagesForChat() {
+    if (!currentChat) return;
+
+    if (currentChat.type === 'dm') {
+        await loadDirectMessages(currentChat.id);
+    } else if (currentChat.type === 'group') {
+        await loadGroupMessages(currentChat.id);
+    }
+}
+
+async function loadDirectMessages(partnerId) {
     try {
         const { data: messages, error } = await window.supabaseClient
             .from('messages')
@@ -647,6 +695,23 @@ async function loadMessages(partnerId) {
     }
 }
 
+async function loadGroupMessages(groupId) {
+    try {
+        const { data: messages, error } = await window.supabaseClient
+            .from('messages')
+            .select('*, sender:profiles!messages_sender_id_fkey(*)')
+            .eq('group_id', groupId)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        renderMessages(messages || []);
+
+    } catch (error) {
+        console.error('Failed to load group messages:', error);
+    }
+}
+
 async function sendMessage() {
     const input = document.getElementById('message-input');
     const content = input.value.trim();
@@ -656,11 +721,16 @@ async function sendMessage() {
     try {
         const messageData = {
             sender_id: currentUser.id,
-            receiver_id: currentChat.id,
             content: content,
             type: 'text',
             created_at: new Date().toISOString()
         };
+
+        if (currentChat.type === 'dm') {
+            messageData.receiver_id = currentChat.id;
+        } else if (currentChat.type === 'group') {
+            messageData.group_id = currentChat.id;
+        }
 
         if (disappearingMode) {
             messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -720,11 +790,16 @@ async function handleImageUpload(e) {
                 // Send message with base64 image
                 const messageData = {
                     sender_id: currentUser.id,
-                    receiver_id: currentChat.id,
                     content: base64Image,
                     type: 'image',
                     created_at: new Date().toISOString()
                 };
+
+                if (currentChat.type === 'dm') {
+                    messageData.receiver_id = currentChat.id;
+                } else if (currentChat.type === 'group') {
+                    messageData.group_id = currentChat.id;
+                }
 
                 if (disappearingMode) {
                     messageData.expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -742,7 +817,6 @@ async function handleImageUpload(e) {
                 }
 
                 appendMessage(message, false);
-                showToast('Image sent!', 'success');
 
                 // Scroll to bottom
                 const container = document.getElementById('messages-container');
@@ -880,7 +954,7 @@ function renderConversations() {
         const unreadDisplay = conv.unread_count > 9 ? '9+' : conv.unread_count;
 
         return `
-        <button class="conversation-item ${currentChat && currentChat.id === conv.user.id ? 'active' : ''}" 
+        <button class="conversation-item ${currentChat && currentChat.type === 'dm' && currentChat.id === conv.user.id ? 'active' : ''}" 
                 data-user-id="${conv.user.id}"
                 onclick="openChat('${conv.user.id}')">
             <div class="avatar">
@@ -905,6 +979,143 @@ function renderConversations() {
         </button>
     `;
     }).join('');
+}
+
+function renderGroups() {
+    const container = document.getElementById('groups-list');
+
+    if (!groups || groups.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state small">
+                <p>No groups yet</p>
+                <span>Create one to start!</span>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = groups.map(group => {
+        const memberCount = group.member_count || 0;
+        const activeClass = currentChat && currentChat.type === 'group' && currentChat.id === group.id ? 'active' : '';
+        return `
+        <button class="conversation-item ${activeClass}" data-group-id="${group.id}" onclick="openGroupChat('${group.id}')">
+            <div class="avatar">
+                ${group.avatar ?
+                `<img src="${group.avatar}" alt="${escapeHtml(group.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+                `<span>${escapeHtml(group.name.charAt(0).toUpperCase())}</span>`
+            }
+                <span class="online-indicator offline"></span>
+            </div>
+            <div class="conversation-info">
+                <div class="conversation-name">
+                    <span class="conversation-username">${escapeHtml(group.name)}</span>
+                    <span class="conversation-time">${memberCount} member${memberCount === 1 ? '' : 's'}</span>
+                </div>
+                <div class="conversation-preview">
+                    <span>${group.last_message ? escapeHtml(truncate(group.last_message.content || '', 30)) : 'Start a conversation'}</span>
+                    ${group.unread_count && group.unread_count > 0 ? `<span class="unread-badge">${group.unread_count > 9 ? '9+' : group.unread_count}</span>` : ''}
+                </div>
+            </div>
+        </button>
+    `;
+    }).join('');
+}
+
+function filterGroups(query) {
+    const items = document.querySelectorAll('.groups-list .conversation-item');
+    items.forEach(item => {
+        const name = item.querySelector('.conversation-username').textContent.toLowerCase();
+        item.style.display = name.includes(query) ? '' : 'none';
+    });
+}
+
+function openCreateGroupModal() {
+    const modal = document.getElementById('create-group-modal');
+    document.getElementById('group-name-input').value = '';
+    document.getElementById('group-members-input').value = '';
+    document.getElementById('group-error').style.display = 'none';
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeCreateGroupModal() {
+    const modal = document.getElementById('create-group-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+async function createGroup() {
+    const nameInput = document.getElementById('group-name-input');
+    const membersInput = document.getElementById('group-members-input');
+    const errorDiv = document.getElementById('group-error');
+    const saveBtn = document.getElementById('create-group-btn');
+
+    const groupName = nameInput.value.trim();
+    const usernames = membersInput.value
+        .split(',')
+        .map(u => u.trim())
+        .filter(u => u.length > 0);
+
+    if (groupName.length < 3) {
+        errorDiv.textContent = 'Group name must be at least 3 characters';
+        errorDiv.style.display = 'block';
+        return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Creating...';
+    errorDiv.style.display = 'none';
+
+    try {
+        // Fetch member profiles
+        let memberProfiles = [];
+        if (usernames.length > 0) {
+            const { data: profiles, error: profileError } = await window.supabaseClient
+                .from('profiles')
+                .select('id, username')
+                .in('username', usernames);
+
+            if (profileError) throw profileError;
+            memberProfiles = profiles || [];
+        }
+
+        // Create group
+        const { data: group, error: groupError } = await window.supabaseClient
+            .from('group_chats')
+            .insert({
+                name: groupName,
+                creator_id: currentUser.id,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (groupError) throw groupError;
+
+        // Build members list (ensure creator included)
+        const memberRows = [currentUser.id, ...memberProfiles.map(p => p.id)]
+            .filter((id, index, arr) => arr.indexOf(id) === index)
+            .map(id => ({ group_id: group.id, member_id: id, joined_at: new Date().toISOString() }));
+
+        if (memberRows.length > 0) {
+            const { error: memberError } = await window.supabaseClient
+                .from('group_members')
+                .insert(memberRows);
+            if (memberError) throw memberError;
+        }
+
+        await loadGroups();
+        closeCreateGroupModal();
+        showToast('Group created', 'success');
+
+    } catch (error) {
+        console.error('Failed to create group:', error);
+        errorDiv.textContent = 'Failed to create group';
+        errorDiv.style.display = 'block';
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Create';
+    }
 }
 
 function filterConversations(query) {
@@ -1094,7 +1305,7 @@ window.openChat = async function (partnerId) {
         return;
     }
 
-    currentChat = user;
+    currentChat = { type: 'dm', id: user.id, user };
 
     // Update UI
     document.getElementById('chat-empty').classList.add('hidden');
@@ -1120,11 +1331,44 @@ window.openChat = async function (partnerId) {
     });
 
     // Load messages
-    await loadMessages(partnerId);
+    await loadMessagesForChat();
 
     // Refresh conversations to update unread count
     loadConversations();
 }
+
+window.openGroupChat = async function (groupId) {
+    const group = groups.find(g => `${g.id}` === `${groupId}`);
+    if (!group) {
+        showToast('Group not found', 'error');
+        return;
+    }
+
+    currentChat = { type: 'group', id: group.id, group };
+
+    // Update UI
+    document.getElementById('chat-empty').classList.add('hidden');
+    document.getElementById('chat-active').classList.remove('hidden');
+    document.getElementById('sidebar').classList.add('hidden');
+
+    // Update chat header (no online indicator for groups)
+    const chatAvatar = document.getElementById('chat-avatar');
+    if (group.avatar) {
+        chatAvatar.innerHTML = `<img src="${group.avatar}" alt="${group.name}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+    } else {
+        chatAvatar.textContent = group.name.charAt(0).toUpperCase();
+    }
+    document.getElementById('chat-username').textContent = group.name;
+    updateChatOnlineStatus(false);
+    document.getElementById('chat-status').textContent = `${group.member_count || 0} members`;
+
+    document.querySelectorAll('.conversation-item').forEach(item => {
+        const isGroupItem = item.getAttribute('data-group-id');
+        item.classList.toggle('active', isGroupItem && `${isGroupItem}` === `${group.id}`);
+    });
+
+    await loadMessagesForChat();
+};
 
 // Utility Functions
 
@@ -1250,6 +1494,8 @@ function handleLongPressEnd() {
     }
 }
 
+let editingMessageId = null;
+
 async function editMessage(messageId) {
     try {
         // Hide context menu
@@ -1265,51 +1511,96 @@ async function editMessage(messageId) {
 
         const currentContent = contentDiv.textContent;
 
-        // Prompt for new content
-        const newContent = prompt('Edit message:', currentContent);
-        if (newContent === null || newContent.trim() === '' || newContent === currentContent) {
-            return; // User cancelled or no changes
-        }
+        // Show modal with current content
+        const modal = document.getElementById('edit-message-modal');
+        const textarea = document.getElementById('edit-message-textarea');
+        const errorDiv = document.getElementById('edit-error');
+        const saveBtn = document.getElementById('edit-message-save-btn');
 
-        // Update in database
-        const { error } = await window.supabaseClient
-            .from('messages')
-            .update({
-                content: newContent.trim(),
-                edited: true,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', messageId)
-            .eq('sender_id', currentUser.id);
+        textarea.value = currentContent;
+        errorDiv.style.display = 'none';
+        editingMessageId = messageId;
 
-        if (error) {
-            console.error('Edit error:', error);
-            throw error;
-        }
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
 
-        // Update UI
-        contentDiv.textContent = newContent.trim();
+        // Focus textarea
+        textarea.focus();
+        textarea.select();
 
-        // Add edited indicator if not present
-        let editedSpan = messageElement.querySelector('.message-edited');
-        if (!editedSpan) {
-            editedSpan = document.createElement('span');
-            editedSpan.className = 'message-edited';
-            editedSpan.textContent = ' (edited)';
-            const timeDiv = messageElement.querySelector('.message-time');
-            if (timeDiv) {
-                timeDiv.appendChild(editedSpan);
+        // Setup save handler
+        saveBtn.onclick = async () => {
+            const newContent = textarea.value.trim();
+
+            if (newContent === '' || newContent === currentContent) {
+                closeEditMessageModal();
+                return;
             }
-        }
 
-        showToast('Message edited', 'success');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
 
-        // Reload conversations to update preview
-        loadConversations();
+            try {
+                // Update in database
+                const { error } = await window.supabaseClient
+                    .from('messages')
+                    .update({
+                        content: newContent,
+                        edited: true,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', messageId)
+                    .eq('sender_id', currentUser.id);
+
+                if (error) {
+                    console.error('Edit error:', error);
+                    throw error;
+                }
+
+                // Update UI
+                contentDiv.textContent = newContent;
+
+                // Add edited indicator if not present
+                let editedSpan = messageElement.querySelector('.message-edited');
+                if (!editedSpan) {
+                    editedSpan = document.createElement('span');
+                    editedSpan.className = 'message-edited';
+                    editedSpan.textContent = ' (edited)';
+                    const timeDiv = messageElement.querySelector('.message-time');
+                    if (timeDiv) {
+                        timeDiv.appendChild(editedSpan);
+                    }
+                }
+
+                showToast('Message edited', 'success');
+
+                // Reload conversations to update preview
+                loadConversations();
+                closeEditMessageModal();
+
+            } catch (error) {
+                console.error('Failed to edit message:', error);
+                errorDiv.textContent = 'Failed to edit message';
+                errorDiv.style.display = 'block';
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            }
+        };
+
     } catch (error) {
         console.error('Failed to edit message:', error);
         showToast('Failed to edit message', 'error');
     }
+}
+
+function closeEditMessageModal() {
+    const modal = document.getElementById('edit-message-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    editingMessageId = null;
+    const saveBtn = document.getElementById('edit-message-save-btn');
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
 }
 
 async function deleteMessage(messageId) {
@@ -1365,6 +1656,9 @@ function closeImageViewer() {
 
 window.openImageViewer = openImageViewer;
 window.closeImageViewer = closeImageViewer;
+window.closeEditMessageModal = closeEditMessageModal;
+window.openCreateGroupModal = openCreateGroupModal;
+window.closeCreateGroupModal = closeCreateGroupModal;
 
 // ========================================
 // Username Setup Modal (for Google Sign-In)
