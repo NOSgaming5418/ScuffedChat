@@ -8,11 +8,18 @@ class WebSocketClient {
         this.reconnectDelay = 1000;
         this.listeners = {};
         this.connected = false;
+        this.userId = null;
     }
 
-    connect() {
+    connect(userId = null) {
+        this.userId = userId;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        let wsUrl = `${protocol}//${window.location.host}/ws`;
+        
+        // Add user_id as query parameter if available
+        if (userId) {
+            wsUrl += `?user_id=${encodeURIComponent(userId)}`;
+        }
 
         try {
             this.ws = new WebSocket(wsUrl);
@@ -62,7 +69,7 @@ class WebSocketClient {
         console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
         setTimeout(() => {
-            this.connect();
+            this.connect(this.userId);
         }, delay);
     }
 

@@ -26,6 +26,14 @@ GRANT SELECT, UPDATE ON profiles TO authenticated;
 -- Enable realtime for messages table (if not already enabled)
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 
+-- Enable realtime for profiles table for live online status updates
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'profiles') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
+    END IF;
+END $$;
+
 -- Create RLS policy to allow users to update their own last_seen
 DROP POLICY IF EXISTS "Users can update their own last_seen" ON profiles;
 CREATE POLICY "Users can update their own last_seen" ON profiles

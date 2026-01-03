@@ -120,23 +120,6 @@ BEGIN
     END IF;
 END $$;
 
--- Create messages table
-CREATE TABLE IF NOT EXISTS messages (
-    id BIGSERIAL PRIMARY KEY,
-    sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-    group_id BIGINT REFERENCES group_chats(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    type VARCHAR(10) DEFAULT 'text' CHECK (type IN ('text', 'image')),
-    edited BOOLEAN DEFAULT false,
-    replied_to_message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,
-    mentions UUID[],
-    updated_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
-    read_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 -- Create group_chats table
 CREATE TABLE IF NOT EXISTS group_chats (
     id BIGSERIAL PRIMARY KEY,
@@ -155,6 +138,23 @@ CREATE TABLE IF NOT EXISTS group_members (
     member_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     joined_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(group_id, member_id)
+);
+
+-- Create messages table
+CREATE TABLE IF NOT EXISTS messages (
+    id BIGSERIAL PRIMARY KEY,
+    sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+    group_id BIGINT REFERENCES group_chats(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    type VARCHAR(10) DEFAULT 'text' CHECK (type IN ('text', 'image')),
+    edited BOOLEAN DEFAULT false,
+    replied_to_message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,
+    mentions UUID[],
+    updated_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Create friends table
@@ -211,6 +211,57 @@ ALTER TABLE group_chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
 
 -- ========================================
+-- 3b. HELPER FUNCTIONS FOR RLS (Must be defined before policies that use them)
+-- These functions use SECURITY DEFINER to bypass RLS and prevent infinite recursion
+-- ========================================
+
+-- Helper function to check group membership (bypasses RLS)
+CREATE OR REPLACE FUNCTION is_group_member(check_group_id BIGINT, check_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM group_members 
+        WHERE group_id = check_group_id 
+        AND member_id = check_user_id
+    );
+$$;
+
+-- Helper function to check if user is group creator (bypasses RLS)
+CREATE OR REPLACE FUNCTION is_group_creator(check_group_id BIGINT, check_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM group_chats 
+        WHERE id = check_group_id 
+        AND creator_id = check_user_id
+    );
+$$;
+
+-- Helper function to get group creator ID (bypasses RLS)
+CREATE OR REPLACE FUNCTION get_group_creator(check_group_id BIGINT)
+RETURNS UUID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+    SELECT creator_id FROM group_chats WHERE id = check_group_id;
+$$;
+
+-- Grant execute permission on helper functions
+GRANT EXECUTE ON FUNCTION is_group_member(BIGINT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION is_group_creator(BIGINT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_group_creator(BIGINT) TO authenticated;
+
+-- ========================================
 -- 4. PROFILES RLS POLICIES
 -- ========================================
 
@@ -228,31 +279,26 @@ CREATE POLICY "Users can update their own profile" ON profiles
 
 -- ========================================
 -- 5. MESSAGES RLS POLICIES
+-- Note: These policies use is_group_member() helper function defined in section 7
 -- ========================================
 
 DROP POLICY IF EXISTS "Users can view their own messages" ON messages;
-CREATE POLICY "Users can view their own messages" ON messages
+DROP POLICY IF EXISTS "messages_select_policy" ON messages;
+CREATE POLICY "messages_select_policy" ON messages
     FOR SELECT USING (
         auth.uid() = sender_id 
         OR auth.uid() = receiver_id
-        OR (
-            group_id IS NOT NULL AND auth.uid() IN (
-                SELECT member_id FROM group_members WHERE group_id = messages.group_id
-            )
-        )
+        OR (group_id IS NOT NULL AND is_group_member(group_id, auth.uid()))
     );
 
 DROP POLICY IF EXISTS "Users can send messages" ON messages;
-CREATE POLICY "Users can send messages" ON messages
+DROP POLICY IF EXISTS "messages_insert_policy" ON messages;
+CREATE POLICY "messages_insert_policy" ON messages
     FOR INSERT WITH CHECK (
         auth.uid() = sender_id
         AND (
             receiver_id IS NOT NULL 
-            OR (
-                group_id IS NOT NULL AND auth.uid() IN (
-                    SELECT member_id FROM group_members WHERE group_id = messages.group_id
-                )
-            )
+            OR (group_id IS NOT NULL AND is_group_member(group_id, auth.uid()))
         )
     );
 
@@ -289,70 +335,84 @@ CREATE POLICY "Users can delete their friendships" ON friends
     FOR DELETE USING (auth.uid() = user_id OR auth.uid() = friend_id);
 
 -- ========================================
--- 7. GROUP CHATS RLS POLICIES
+-- 7. GROUP CHATS RLS POLICIES (Using helper functions from section 3b)
 -- ========================================
 
 DROP POLICY IF EXISTS "Users can view groups they are members of" ON group_chats;
-CREATE POLICY "Users can view groups they are members of" ON group_chats
+DROP POLICY IF EXISTS "Group creators can view their groups" ON group_chats;
+DROP POLICY IF EXISTS "group_chats_select_policy" ON group_chats;
+CREATE POLICY "group_chats_select_policy" ON group_chats
     FOR SELECT USING (
-        auth.uid() IN (
-            SELECT member_id FROM group_members WHERE group_id = group_chats.id
-        )
+        auth.uid() = creator_id
+        OR is_group_member(id, auth.uid())
     );
 
-DROP POLICY IF EXISTS "Group creators can view their groups" ON group_chats;
-CREATE POLICY "Group creators can view their groups" ON group_chats
-    FOR SELECT USING (auth.uid() = creator_id);
-
 DROP POLICY IF EXISTS "Users can create groups" ON group_chats;
-CREATE POLICY "Users can create groups" ON group_chats
+DROP POLICY IF EXISTS "group_chats_insert_policy" ON group_chats;
+CREATE POLICY "group_chats_insert_policy" ON group_chats
     FOR INSERT WITH CHECK (auth.uid() = creator_id);
 
 DROP POLICY IF EXISTS "Group creators can update their groups" ON group_chats;
-CREATE POLICY "Group creators can update their groups" ON group_chats
+DROP POLICY IF EXISTS "group_chats_update_policy" ON group_chats;
+CREATE POLICY "group_chats_update_policy" ON group_chats
     FOR UPDATE USING (auth.uid() = creator_id);
 
 DROP POLICY IF EXISTS "Group creators can delete their groups" ON group_chats;
-CREATE POLICY "Group creators can delete their groups" ON group_chats
+DROP POLICY IF EXISTS "group_chats_delete_policy" ON group_chats;
+CREATE POLICY "group_chats_delete_policy" ON group_chats
     FOR DELETE USING (auth.uid() = creator_id);
 
 -- ========================================
--- 8. GROUP MEMBERS RLS POLICIES
+-- 9. GROUP MEMBERS RLS POLICIES (Using helper functions)
 -- ========================================
 
 DROP POLICY IF EXISTS "Users can view members of groups they are in" ON group_members;
-CREATE POLICY "Users can view members of groups they are in" ON group_members
+DROP POLICY IF EXISTS "group_members_select_policy" ON group_members;
+CREATE POLICY "group_members_select_policy" ON group_members
     FOR SELECT USING (
-        auth.uid() = member_id
+        is_group_member(group_id, auth.uid())
+        OR is_group_creator(group_id, auth.uid())
     );
 
 DROP POLICY IF EXISTS "Group creators can add members" ON group_members;
-CREATE POLICY "Group creators can add members" ON group_members
+DROP POLICY IF EXISTS "group_members_insert_policy" ON group_members;
+CREATE POLICY "group_members_insert_policy" ON group_members
     FOR INSERT WITH CHECK (
         auth.uid() = member_id
-        OR auth.uid() = (SELECT creator_id FROM group_chats WHERE id = group_id)
+        OR get_group_creator(group_id) = auth.uid()
     );
 
 DROP POLICY IF EXISTS "Group creators can remove members" ON group_members;
-CREATE POLICY "Group creators can remove members" ON group_members
+DROP POLICY IF EXISTS "group_members_delete_policy" ON group_members;
+CREATE POLICY "group_members_delete_policy" ON group_members
     FOR DELETE USING (
         auth.uid() = member_id
+        OR get_group_creator(group_id) = auth.uid()
     );
 
 -- ========================================
--- 9. PUSH NOTIFICATIONS RLS POLICIES
+-- 10. PUSH NOTIFICATIONS RLS POLICIES
 -- ========================================
 
 DROP POLICY IF EXISTS "Users can view their own subscriptions" ON push_subscriptions;
-CREATE POLICY "Users can view their own subscriptions" ON push_subscriptions
+DROP POLICY IF EXISTS "push_subscriptions_select_policy" ON push_subscriptions;
+CREATE POLICY "push_subscriptions_select_policy" ON push_subscriptions
     FOR SELECT USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can insert their own subscriptions" ON push_subscriptions;
-CREATE POLICY "Users can insert their own subscriptions" ON push_subscriptions
+DROP POLICY IF EXISTS "push_subscriptions_insert_policy" ON push_subscriptions;
+CREATE POLICY "push_subscriptions_insert_policy" ON push_subscriptions
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+-- UPDATE policy is CRITICAL for upsert operations
+DROP POLICY IF EXISTS "Users can update their own subscriptions" ON push_subscriptions;
+DROP POLICY IF EXISTS "push_subscriptions_update_policy" ON push_subscriptions;
+CREATE POLICY "push_subscriptions_update_policy" ON push_subscriptions
+    FOR UPDATE USING (auth.uid() = user_id);
+
 DROP POLICY IF EXISTS "Users can delete their own subscriptions" ON push_subscriptions;
-CREATE POLICY "Users can delete their own subscriptions" ON push_subscriptions
+DROP POLICY IF EXISTS "push_subscriptions_delete_policy" ON push_subscriptions;
+CREATE POLICY "push_subscriptions_delete_policy" ON push_subscriptions
     FOR DELETE USING (auth.uid() = user_id);
 
 -- Allow service role (backend) to read all subscriptions
@@ -368,6 +428,9 @@ DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'messages') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'profiles') THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'friends') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE friends;

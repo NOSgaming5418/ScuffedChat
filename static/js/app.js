@@ -11,6 +11,7 @@ let disappearingMode = false;
 let messageSubscription = null;
 let replyingToMessage = null; // Track message being replied to
 let mentionAutocomplete = null; // Track mention autocomplete state
+const messagesCache = new Map(); // Cache messages by ID for quick lookup
 
 // Online status tracking
 const onlineUsers = new Map();
@@ -322,8 +323,8 @@ function setupWebSocket() {
         return;
     }
 
-    // Connect WebSocket
-    window.wsClient.connect();
+    // Connect WebSocket with user ID for authentication
+    window.wsClient.connect(currentUser?.id || null);
     
     // Start heartbeat to update last_seen (for online status)
     startOnlineStatusHeartbeat();
@@ -377,8 +378,8 @@ function startOnlineStatusHeartbeat() {
     // Update immediately
     updateLastSeen();
     
-    // Update every 30 seconds
-    setInterval(updateLastSeen, 30000);
+    // Update every 15 seconds for faster online status detection
+    setInterval(updateLastSeen, 15000);
     
     // Update when page becomes visible (tab switching)
     document.addEventListener('visibilitychange', () => {
@@ -429,8 +430,8 @@ async function loadOnlineStatus() {
     }
 }
 
-// Periodically refresh online status
-setInterval(loadOnlineStatus, 30000); // Check every 30 seconds
+// Periodically refresh online status (backup for real-time)
+setInterval(loadOnlineStatus, 60000); // Check every 60 seconds as backup
 
 // Fetch online status for all friends from backend
 async function updateOnlineStatusForFriends() {
@@ -543,6 +544,42 @@ function setupRealtimeSubscription() {
                 }
                 // Reload conversations to update preview
                 loadConversations();
+            }
+        )
+        .subscribe();
+
+    // Subscribe to profile updates for real-time online status
+    window.supabaseClient
+        .channel('profiles')
+        .on('postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'profiles' },
+            (payload) => {
+                const profile = payload.new;
+                
+                // Only care about friends' status changes
+                const isFriend = friends.some(f => f.id === profile.id);
+                if (!isFriend) return;
+                
+                // Check if user is online (last_seen within 2 minutes)
+                const onlineThreshold = new Date(Date.now() - 2 * 60 * 1000);
+                const lastSeen = new Date(profile.last_seen);
+                const isOnline = lastSeen > onlineThreshold;
+                
+                // Update online status
+                if (isOnline) {
+                    onlineUsers.set(profile.id, true);
+                } else {
+                    onlineUsers.delete(profile.id);
+                }
+                
+                // Update UI
+                renderFriends();
+                renderConversations();
+                
+                // Update chat header if viewing this user
+                if (currentChat && currentChat.type === 'dm' && currentChat.id === profile.id) {
+                    updateChatOnlineStatus(isOnline);
+                }
             }
         )
         .subscribe();
@@ -708,6 +745,18 @@ async function loadGroups() {
         if (error) throw error;
 
         groups = (data || []).map(entry => entry.group || {});
+
+        // Fetch member count for each group
+        for (let group of groups) {
+            const { count, error: countError } = await window.supabaseClient
+                .from('group_members')
+                .select('*', { count: 'exact', head: true })
+                .eq('group_id', group.id);
+            
+            if (!countError) {
+                group.member_count = count || 0;
+            }
+        }
 
         renderGroups();
     } catch (error) {
@@ -1336,6 +1385,11 @@ function renderMessages(messages) {
         return;
     }
 
+    // Cache messages for reply functionality
+    messages.forEach(msg => {
+        messagesCache.set(msg.id.toString(), msg);
+    });
+
     container.innerHTML = messages.map(msg => createMessageHTML(msg, msg.sender_id !== currentUser.id)).join('');
 
     // Scroll to bottom
@@ -1350,6 +1404,9 @@ function appendMessage(message, received) {
     if (emptyState) {
         emptyState.remove();
     }
+
+    // Cache message for reply functionality
+    messagesCache.set(message.id.toString(), message);
 
     container.insertAdjacentHTML('beforeend', createMessageHTML(message, received));
 
@@ -2055,24 +2112,32 @@ window.closeProfileModal = closeProfileModal;
 // ========================================
 
 function replyToMessage(messageId) {
-    // Find the message
-    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (!messageElement) return;
+    // Get message from cache
+    const message = messagesCache.get(messageId.toString());
+    if (!message) {
+        console.warn('Message not found in cache:', messageId);
+        return;
+    }
 
-    const contentDiv = messageElement.querySelector('.message-content, .message-image');
-    const senderDiv = messageElement.querySelector('.message-sender');
-    
     let content = '';
+    let sender = 'Unknown';
     let type = 'text';
     
-    if (contentDiv && contentDiv.classList.contains('message-content')) {
-        content = contentDiv.textContent;
-    } else if (contentDiv && contentDiv.classList.contains('message-image')) {
-        content = '[Image]';
-        type = 'image';
+    // Get sender name
+    if (message.sender && message.sender.username) {
+        sender = message.sender.username;
+    } else if (message.sender_id === currentUser.id) {
+        sender = 'You';
     }
     
-    const sender = senderDiv ? senderDiv.textContent : 'Unknown';
+    // Get content
+    if (message.type === 'image') {
+        content = '[Image]';
+        type = 'image';
+    } else {
+        content = message.content || '';
+        type = 'text';
+    }
     
     replyingToMessage = {
         id: messageId,
@@ -2164,14 +2229,21 @@ async function openGroupSettings(groupId) {
     try {
         const { data: memberData, error } = await window.supabaseClient
             .from('group_members')
-            .select('member:profiles(*)')
+            .select('member_id')
             .eq('group_id', groupId);
         
         if (error) throw error;
         
-        const members = memberData.map(m => m.member);
+        // Fetch profile info for each member
+        const memberIds = memberData.map(m => m.member_id);
+        const { data: profiles, error: profileError } = await window.supabaseClient
+            .from('profiles')
+            .select('*')
+            .in('id', memberIds);
         
-        showGroupSettingsModal(group, members);
+        if (profileError) throw profileError;
+        
+        showGroupSettingsModal(group, profiles || []);
     } catch (error) {
         console.error('Failed to load group members:', error);
         showToast('Failed to load group settings', 'error');
@@ -2189,11 +2261,40 @@ function showGroupSettingsModal(group, members) {
     document.getElementById('group-settings-name').value = group.name;
     document.getElementById('current-group-id').value = group.id;
     
+    // Display current group avatar
+    const avatarElement = document.getElementById('current-group-avatar');
+    if (group.avatar) {
+        avatarElement.innerHTML = `<img src="${group.avatar}" alt="${escapeHtml(group.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+    } else {
+        avatarElement.innerHTML = `<span>${escapeHtml(group.name.charAt(0).toUpperCase())}</span>`;
+    }
+    
+    // Reset file input
+    const fileInput = document.getElementById('group-avatar-upload');
+    fileInput.value = '';
+    
+    // Add preview when file is selected
+    fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                avatarElement.innerHTML = `<img src="${e.target.result}" alt="Preview" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+    
     // Render members list
     const membersList = document.getElementById('group-members-list');
     membersList.innerHTML = members.map(member => `
         <div class=\"group-member-item\">
-            <div class=\"member-avatar\">${member.username.charAt(0).toUpperCase()}</div>
+            <div class=\"member-avatar\">
+                ${member.avatar ?
+                    `<img src="${member.avatar}" alt="${escapeHtml(member.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+                    `<span>${member.username.charAt(0).toUpperCase()}</span>`
+                }
+            </div>
             <span class=\"member-username\">${escapeHtml(member.username)}</span>
             ${member.id !== group.creator_id && member.id !== currentUser.id ? `
                 <button class=\"btn-remove-member\" onclick=\"removeMemberFromGroup('${group.id}', '${member.id}')\">Remove</button>
@@ -2255,6 +2356,87 @@ async function updateGroupName() {
     }
 }
 
+async function updateGroupAvatar() {
+    const groupId = document.getElementById('current-group-id').value;
+    const fileInput = document.getElementById('group-avatar-upload');
+    
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showToast('Please select an image first', 'error');
+        return;
+    }
+    
+    const file = fileInput.files[0];
+    
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+        showToast('Image must be less than 5MB', 'error');
+        return;
+    }
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+        showToast('Please upload an image file', 'error');
+        return;
+    }
+    
+    try {
+        // Upload to Supabase storage
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `groups/${groupId}/${fileName}`;
+        
+        const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
+            .from('avatars')
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: true
+            });
+        
+        if (uploadError) throw uploadError;
+        
+        // Get public URL
+        const { data: urlData } = window.supabaseClient.storage
+            .from('avatars')
+            .getPublicUrl(filePath);
+        
+        const avatarUrl = urlData.publicUrl;
+        
+        // Update group in database
+        const { error } = await window.supabaseClient
+            .from('group_chats')
+            .update({ avatar: avatarUrl, updated_at: new Date().toISOString() })
+            .eq('id', groupId)
+            .eq('creator_id', currentUser.id); // Only creator can update avatar
+        
+        if (error) throw error;
+        
+        // Update local groups array
+        const group = groups.find(g => `${g.id}` === `${groupId}`);
+        if (group) {
+            group.avatar = avatarUrl;
+        }
+        
+        // Update modal preview
+        const avatarElement = document.getElementById('current-group-avatar');
+        avatarElement.innerHTML = `<img src="${avatarUrl}" alt="Group" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+        
+        // Update UI
+        renderGroups();
+        if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
+            const chatAvatar = document.querySelector('.chat-header .avatar');
+            if (chatAvatar) {
+                chatAvatar.innerHTML = `<img src="${avatarUrl}" alt="Group" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
+            }
+        }
+        
+        showToast('Group avatar updated successfully', 'success');
+        fileInput.value = ''; // Reset file input
+    } catch (error) {
+        console.error('Failed to update group avatar:', error);
+        showToast('Failed to update group avatar', 'error');
+    }
+}
+
 async function addMemberToGroup() {
     const groupId = document.getElementById('current-group-id').value;
     const username = document.getElementById('add-member-input').value.trim();
@@ -2307,7 +2489,11 @@ async function addMemberToGroup() {
         
     } catch (error) {
         console.error('Failed to add member:', error);
-        showToast('Failed to add member', 'error');
+        if (error.message && error.message.includes('violates row-level security')) {
+            showToast('Permission denied. Only group creator can add members.', 'error');
+        } else {
+            showToast('Failed to add member: ' + (error.message || 'Unknown error'), 'error');
+        }
     }
 }
 

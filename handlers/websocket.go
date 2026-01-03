@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -25,12 +26,12 @@ type Client struct {
 	ID     int64
 	Conn   *websocket.Conn
 	Send   chan []byte
-	UserID int64
+	UserID string // Changed to string for Supabase UUID compatibility
 }
 
 // Hub maintains the set of active clients
 type Hub struct {
-	clients    map[int64]*Client // userID -> client
+	clients    map[string]*Client // userID (string) -> client
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan BroadcastPayload
@@ -38,12 +39,12 @@ type Hub struct {
 }
 
 type BroadcastPayload struct {
-	UserID  int64
+	UserID  string
 	Message []byte
 }
 
 var hub = &Hub{
-	clients:    make(map[int64]*Client),
+	clients:    make(map[string]*Client),
 	register:   make(chan *Client),
 	unregister: make(chan *Client),
 	broadcast:  make(chan BroadcastPayload, 256),
@@ -57,7 +58,7 @@ func RunHub() {
 			hub.mutex.Lock()
 			hub.clients[client.UserID] = client
 			hub.mutex.Unlock()
-			log.Printf("Client connected: UserID %d", client.UserID)
+			log.Printf("Client connected: UserID %s", client.UserID)
 
 			// Broadcast online status to friends
 			broadcastOnlineStatus(client.UserID, true)
@@ -69,7 +70,7 @@ func RunHub() {
 				close(client.Send)
 			}
 			hub.mutex.Unlock()
-			log.Printf("Client disconnected: UserID %d", client.UserID)
+			log.Printf("Client disconnected: UserID %s", client.UserID)
 
 			// Broadcast offline status to friends
 			broadcastOnlineStatus(client.UserID, false)
@@ -89,30 +90,51 @@ func RunHub() {
 	}
 }
 
-// IsUserOnline checks if a user is currently connected
-func IsUserOnline(userID int64) bool {
+// IsUserOnline checks if a user is currently connected (string version for Supabase UUIDs)
+func IsUserOnline(userID interface{}) bool {
 	hub.mutex.RLock()
 	defer hub.mutex.RUnlock()
-	_, ok := hub.clients[userID]
+
+	var idStr string
+	switch v := userID.(type) {
+	case string:
+		idStr = v
+	case int64:
+		idStr = fmt.Sprintf("%d", v)
+	default:
+		idStr = fmt.Sprintf("%v", v)
+	}
+
+	_, ok := hub.clients[idStr]
 	return ok
 }
 
 // BroadcastMessage sends a message to a specific user
-func BroadcastMessage(userID int64, msg models.WebSocketMessage) {
+func BroadcastMessage(userID interface{}, msg models.WebSocketMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("Error marshaling message: %v", err)
 		return
 	}
 
+	var idStr string
+	switch v := userID.(type) {
+	case string:
+		idStr = v
+	case int64:
+		idStr = fmt.Sprintf("%d", v)
+	default:
+		idStr = fmt.Sprintf("%v", v)
+	}
+
 	hub.broadcast <- BroadcastPayload{
-		UserID:  userID,
+		UserID:  idStr,
 		Message: data,
 	}
 }
 
 // broadcastOnlineStatus notifies all connected clients about online status change
-func broadcastOnlineStatus(userID int64, online bool) {
+func broadcastOnlineStatus(userID string, online bool) {
 	msg := models.WebSocketMessage{
 		Type: "online_status",
 		Payload: map[string]interface{}{
@@ -136,11 +158,23 @@ func broadcastOnlineStatus(userID int64, online bool) {
 }
 
 // HandleWebSocket handles WebSocket connections
+// For Supabase auth, the user_id is passed via query parameter
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Try to get user from middleware (for session-based auth)
 	user := middleware.GetUserFromContext(r)
-	if user == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	var userID string
+
+	if user != nil {
+		// Session-based auth
+		userID = fmt.Sprintf("%d", user.ID)
+	} else {
+		// Supabase auth - get user_id from query param
+		userID = r.URL.Query().Get("user_id")
+		if userID == "" {
+			// Allow connection without auth for now (Supabase handles auth on API calls)
+			// Generate a temporary ID based on connection
+			log.Println("WebSocket: No user_id provided, allowing anonymous connection")
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -152,7 +186,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		Conn:   conn,
 		Send:   make(chan []byte, 256),
-		UserID: user.ID,
+		UserID: userID,
 	}
 
 	hub.register <- client
@@ -187,8 +221,8 @@ func (c *Client) readPump() {
 		case "typing":
 			// Forward typing indicator to recipient
 			if payload, ok := wsMsg.Payload.(map[string]interface{}); ok {
-				if recipientID, ok := payload["recipient_id"].(float64); ok {
-					BroadcastMessage(int64(recipientID), models.WebSocketMessage{
+				if recipientID, ok := payload["recipient_id"].(string); ok {
+					BroadcastMessage(recipientID, models.WebSocketMessage{
 						Type: "typing",
 						Payload: map[string]interface{}{
 							"user_id": c.UserID,

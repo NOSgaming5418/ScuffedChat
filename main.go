@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"scuffedsnap/handlers"
 	"scuffedsnap/pkg/push"
 
 	"github.com/joho/godotenv"
@@ -65,6 +66,12 @@ func main() {
 	http.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./static/admin.html")
 	})
+
+	// WebSocket endpoint for real-time features
+	http.HandleFunc("/ws", handlers.HandleWebSocket)
+
+	// Start WebSocket hub in background
+	go handlers.RunHub()
 
 	// Start server
 	log.Printf("🚀 ScuffedSnap server starting on http://localhost:%s\n", port)
