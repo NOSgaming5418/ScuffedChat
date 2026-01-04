@@ -1180,6 +1180,15 @@ body {
     align-self: flex-start;
 }
 
+.message-sender {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 4px;
+    padding-left: var(--spacing-xs);
+    opacity: 0.9;
+}
+
 .message-bubble {
     padding: var(--spacing-sm) var(--spacing-md);
     border-radius: var(--radius-lg);
@@ -1188,7 +1197,7 @@ body {
 
 .message.sent .message-bubble {
     background: var(--primary);
-    color: var(--bg-dark);
+    color: #000000 !important;
     border-bottom-right-radius: var(--spacing-xs);
 }
 
@@ -1196,6 +1205,15 @@ body {
     background: var(--bg-card);
     color: var(--text-primary);
     border-bottom-left-radius: var(--spacing-xs);
+}
+
+.message.sent .message-content {
+    color: #000000 !important;
+    opacity: 1 !important;
+}
+
+.message.sent .message-bubble * {
+    color: #000000 !important;
 }
 
 .message-content {
@@ -1227,7 +1245,8 @@ body {
 }
 
 .message.sent .message-time {
-    color: var(--bg-dark);
+    color: #000000;
+    opacity: 1;
 }
 
 .message-edited {
@@ -1313,6 +1332,7 @@ body {
     border-radius: var(--radius-full);
     padding: var(--spacing-xs);
     transition: var(--transition-fast);
+    position: relative;
 }
 
 .message-input-wrapper:focus-within {
@@ -2062,6 +2082,58 @@ body {
     .section-title {
         font-size: 0.75rem;
     }
+
+    /* Emoji autocomplete mobile adjustments */
+    .emoji-autocomplete {
+        max-width: calc(100vw - 40px);
+        max-height: 150px;
+        font-size: 0.9rem;
+    }
+
+    .emoji-autocomplete-item {
+        padding: 8px 12px;
+    }
+
+    .emoji-icon {
+        font-size: 1.1rem;
+    }
+
+    .emoji-name {
+        font-size: 0.75rem;
+    }
+
+    /* Reply preview mobile adjustments */
+    .reply-preview {
+        padding: 6px 10px;
+        margin-bottom: 6px;
+    }
+
+    .reply-preview-label {
+        font-size: 0.7rem;
+    }
+
+    .reply-preview-text {
+        font-size: 0.75rem;
+    }
+
+    .message-reply-preview {
+        padding: 6px 8px;
+    }
+
+    .reply-to-name {
+        font-size: 0.65rem;
+    }
+
+    .reply-text {
+        font-size: 0.7rem;
+    }
+
+    /* Message sender mobile adjustments */
+    .message-sender {
+        font-size: 0.7rem;
+        padding-left: 4px;
+        margin-bottom: 3px;
+    }
 }
 
 /* Scrollbar styling */
@@ -2146,29 +2218,62 @@ body {
 }
 
 .message-reply-preview {
-    padding: 6px 10px;
-    background: rgba(255, 255, 255, 0.05);
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.1);
     border-left: 3px solid var(--primary);
     border-radius: 4px;
     margin-bottom: 6px;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
     display: flex;
-    align-items: center;
-    gap: 6px;
+    align-items: flex-start;
+    gap: 8px;
 }
 
 .reply-indicator {
-    width: 2px;
-    height: 100%;
+    width: 3px;
+    min-height: 100%;
     background: var(--primary);
+    border-radius: 2px;
+}
+
+.reply-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.reply-to-name {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--primary);
+    opacity: 1;
 }
 
 .reply-text {
-    flex: 1;
+    font-size: 0.75rem;
+    color: var(--text-primary);
+    opacity: 0.8;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.3;
+}
+
+/* Sent message reply preview - dark box like received messages */
+.message.sent .message-reply-preview {
+    background: #2a2a2e;
+    border-left-color: var(--primary);
+}
+
+.message.sent .reply-to-name {
+    color: var(--primary) !important;
+}
+
+.message.sent .reply-text {
+    color: #aaaaaa !important;
+    opacity: 1;
+}
 }
 
 .mention {
@@ -2243,6 +2348,72 @@ body {
 .btn-remove-member:hover {
     background: #e63946;
     transform: translateY(-1px);
+}
+
+/* Emoji Autocomplete */
+.emoji-autocomplete {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    min-width: 220px;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.emoji-autocomplete-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.emoji-autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.emoji-autocomplete-item:hover,
+.emoji-autocomplete-item.selected {
+    background: var(--bg-input-focus);
+}
+
+.emoji-icon {
+    font-size: 1.3rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+}
+
+.emoji-name {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+}
+
+.emoji-autocomplete-item.selected .emoji-name {
+    color: var(--primary);
+    font-weight: 600;
 }
 
 .btn-danger {

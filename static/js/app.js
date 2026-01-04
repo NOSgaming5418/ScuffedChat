@@ -11,7 +11,69 @@ let disappearingMode = false;
 let messageSubscription = null;
 let replyingToMessage = null; // Track message being replied to
 let mentionAutocomplete = null; // Track mention autocomplete state
+let emojiAutocomplete = null; // Track emoji autocomplete state
 const messagesCache = new Map(); // Cache messages by ID for quick lookup
+
+// Emoji mappings (Discord-style)
+const emojiMap = {
+    'smile': '😊', 'joy': '😂', 'heart': '❤️', 'heart_eyes': '😍',
+    'sob': '😭', 'thinking': '🤔', 'thumbsup': '👍', 'thumbsdown': '👎',
+    'fire': '🔥', 'star': '⭐', 'sparkles': '✨', '100': '💯',
+    'clap': '👏', 'pray': '🙏', 'ok_hand': '👌', 'muscle': '💪',
+    'eyes': '👀', 'wave': '👋', 'point_right': '👉', 'point_left': '👈',
+    'sunglasses': '😎', 'wink': '😉', 'blush': '😊', 'grin': '😁',
+    'laughing': '😆', 'sweat_smile': '😅', 'rolling_on_the_floor_laughing': '🤣', 'unamused': '😒',
+    'angry': '😠', 'rage': '😡', 'triumph': '😤', 'scream': '😱',
+    'fearful': '😨', 'cold_sweat': '😰', 'disappointed': '😞', 'cry': '😢',
+    'sleepy': '😪', 'tired_face': '😫', 'yum': '😋', 'relieved': '😌',
+    'stuck_out_tongue': '😛', 'stuck_out_tongue_winking_eye': '😜', 'stuck_out_tongue_closed_eyes': '😝', 'neutral_face': '😐',
+    'expressionless': '😑', 'confused': '😕', 'kissing_heart': '😘', 'kissing': '😗',
+    'kissing_smiling_eyes': '😙', 'kissing_closed_eyes': '😚', 'yawning_face': '🥱', 'face_with_monocle': '🧐',
+    'nerd_face': '🤓', 'sunglasses_face': '😎', 'star_struck': '🤩', 'partying_face': '🥳',
+    'smirk': '😏', 'flushed': '😳', 'pleading_face': '🥺', 'sneezing_face': '🤧',
+    'mask': '😷', 'face_with_thermometer': '🤒', 'face_with_head_bandage': '🤕', 'nauseated_face': '🤢',
+    'vomiting_face': '🤮', 'hot_face': '🥵', 'cold_face': '🥶', 'dizzy_face': '😵',
+    'exploding_head': '🤯', 'cowboy_hat_face': '🤠', 'innocent': '😇', 'smiling_imp': '😈',
+    'skull': '💀', 'skull_and_crossbones': '☠️', 'poop': '💩', 'clown_face': '🤡',
+    'ghost': '👻', 'alien': '👽', 'robot': '🤖', 'jack_o_lantern': '🎃',
+    'red_heart': '❤️', 'orange_heart': '🧡', 'yellow_heart': '💛', 'green_heart': '💚',
+    'blue_heart': '💙', 'purple_heart': '💜', 'black_heart': '🖤', 'white_heart': '🤍',
+    'broken_heart': '💔', 'heart_on_fire': '❤️‍🔥', 'mending_heart': '❤️‍🩹', 'two_hearts': '💕',
+    'sparkling_heart': '💖', 'heartpulse': '💗', 'heartbeat': '💓', 'revolving_hearts': '💞',
+    'cupid': '💘', 'gift_heart': '💝', 'kiss': '💋', 'love_letter': '💌',
+    'rose': '🌹', 'wilted_flower': '🥀', 'wilted_rose': '🥀', 'hibiscus': '🌺',
+    'cherry_blossom': '🌸', 'blossom': '🌼', 'bouquet': '💐', 'sunflower': '🌻',
+    'tada': '🎉', 'confetti_ball': '🎊', 'balloon': '🎈', 'birthday': '🎂',
+    'cake': '🍰', 'cookie': '🍪', 'pizza': '🍕', 'hamburger': '🍔',
+    'fries': '🍟', 'hotdog': '🌭', 'taco': '🌮', 'burrito': '🌯',
+    'coffee': '☕', 'tea': '🍵', 'beer': '🍺', 'wine_glass': '🍷',
+    'champagne': '🍾', 'cocktail': '🍹', 'tropical_drink': '🍹', 'sake': '🍶',
+    'crown': '👑', 'gem': '💎', 'ring': '💍', 'trophy': '🏆',
+    'medal': '🏅', 'soccer': '⚽', 'basketball': '🏀', 'football': '🏈',
+    'baseball': '⚾', 'tennis': '🎾', 'volleyball': '🏐', 'golf': '⛳',
+    'checkmark': '✅', 'x': '❌', 'question': '❓', 'exclamation': '❗',
+    'warning': '⚠️', 'no_entry': '⛔', 'zzz': '💤', 'boom': '💥',
+    'sweat_drops': '💦', 'dash': '💨', 'dizzy': '💫', 'speech_balloon': '💬',
+    'musical_note': '🎵', 'notes': '🎶', 'bell': '🔔', 'no_bell': '🔕',
+    'loudspeaker': '📢', 'mega': '📣', 'telephone': '☎️', 'phone': '📱',
+    'battery': '🔋', 'electric_plug': '🔌', 'computer': '💻', 'keyboard': '⌨️',
+    'desktop_computer': '🖥️', 'printer': '🖨️', 'mouse': '🖱️', 'trackball': '🖲️',
+    'joystick': '🕹️', 'clamp': '🗜️', 'floppy_disk': '💾', 'cd': '💿',
+    'dvd': '📀', 'vhs': '📼', 'camera': '📷', 'video_camera': '📹',
+    'movie_camera': '🎥', 'film_projector': '📽️', 'tv': '📺', 'radio': '📻',
+    'microphone': '🎤', 'headphones': '🎧', 'book': '📖', 'books': '📚',
+    'newspaper': '📰', 'scroll': '📜', 'memo': '📝', 'pencil': '✏️',
+    'pen': '🖊️', 'paintbrush': '🖌️', 'crayon': '🖍️', 'lock': '🔒',
+    'unlock': '🔓', 'key': '🔑', 'hammer': '🔨', 'pick': '⛏️',
+    'wrench': '🔧', 'nut_and_bolt': '🔩', 'gear': '⚙️', 'link': '🔗',
+    'rocket': '🚀', 'airplane': '✈️', 'helicopter': '🚁', 'car': '🚗',
+    'taxi': '🚕', 'bus': '🚌', 'train': '🚆', 'bike': '🚲',
+    'house': '🏠', 'house_with_garden': '🏡', 'office': '🏢', 'hospital': '🏥',
+    'bank': '🏦', 'hotel': '🏨', 'school': '🏫', 'church': '⛪',
+    'rainbow': '🌈', 'cloud': '☁️', 'sun': '☀️', 'star2': '🌟',
+    'moon': '🌙', 'zap': '⚡', 'snowflake': '❄️', 'fire': '🔥',
+    'water_wave': '🌊', 'earth_americas': '🌎', 'earth_africa': '🌍', 'earth_asia': '🌏'
+};
 
 // Online status tracking
 const onlineUsers = new Map();
@@ -555,7 +617,7 @@ function setupRealtimeSubscription() {
         .channel('messages')
         .on('postgres_changes',
             { event: 'INSERT', schema: 'public', table: 'messages' },
-            (payload) => {
+            async (payload) => {
                 const message = payload.new;
                 const isDirect = message.receiver_id && (message.receiver_id === currentUser.id || message.sender_id === currentUser.id);
                 const isGroup = message.group_id && groups.some(g => g.id === message.group_id);
@@ -568,6 +630,17 @@ function setupRealtimeSubscription() {
                 );
 
                 if (chatMatchesCurrent && message.sender_id !== currentUser.id) {
+                    // Fetch sender info for the message
+                    const { data: sender } = await window.supabaseClient
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', message.sender_id)
+                        .single();
+                    
+                    if (sender) {
+                        message.sender = sender;
+                    }
+                    
                     appendMessage(message, true);
                 }
 
@@ -770,9 +843,14 @@ function setupEventListeners() {
 
     document.getElementById('image-input').addEventListener('change', handleImageUpload);
 
+    // Emoji autocomplete on input
+    document.getElementById('message-input').addEventListener('input', handleEmojiAutocomplete);
+    document.getElementById('message-input').addEventListener('keydown', handleEmojiKeydown);
+
     // Context menu for messages
     document.addEventListener('click', () => {
         document.getElementById('message-context-menu').style.display = 'none';
+        hideEmojiAutocomplete();
     });
 }
 
@@ -944,9 +1022,12 @@ async function loadGroupMessages(groupId) {
 
 async function sendMessage() {
     const input = document.getElementById('message-input');
-    const content = input.value.trim();
+    let content = input.value.trim();
 
     if (!content || !currentChat) return;
+
+    // Convert emoji codes to actual emojis
+    content = replaceEmojiCodes(content);
 
     try {
         const messageData = {
@@ -980,10 +1061,15 @@ async function sendMessage() {
         const { data: message, error } = await window.supabaseClient
             .from('messages')
             .insert(messageData)
-            .select()
+            .select('*, sender:profiles!messages_sender_id_fkey(*)')
             .single();
 
         if (error) throw error;
+
+        // Add sender info for display
+        if (!message.sender) {
+            message.sender = currentUserProfile || { username: currentUser.email.split('@')[0], id: currentUser.id };
+        }
 
         appendMessage(message, false);
         input.value = '';
@@ -1052,12 +1138,17 @@ async function handleImageUpload(e) {
                 const { data: message, error } = await window.supabaseClient
                     .from('messages')
                     .insert(messageData)
-                    .select()
+                    .select('*, sender:profiles!messages_sender_id_fkey(*)')
                     .single();
 
                 if (error) {
                     console.error('Database error:', error);
                     throw error;
+                }
+
+                // Add sender info for display
+                if (!message.sender) {
+                    message.sender = currentUserProfile || { username: currentUser.email.split('@')[0], id: currentUser.id };
                 }
 
                 appendMessage(message, false);
@@ -1503,26 +1594,72 @@ function createMessageHTML(message, received) {
     const isEdited = message.edited || false;
     const hasReply = message.replied_to_message_id != null;
 
+    // Get sender name - display for both DM and group messages
+    let senderName = '';
+    if (received && message.sender) {
+        senderName = message.sender.username;
+    } else if (received && message.sender_id) {
+        // If sender object not available, try to get from current chat or show ID
+        if (currentChat && currentChat.type === 'dm' && currentChat.user) {
+            senderName = currentChat.user.username;
+        } else {
+            senderName = 'User';
+        }
+    }
+
     let contentHTML;
     if (isImage) {
         contentHTML = `<img src="${escapeHtml(message.content)}" alt="Image" class="message-image" loading="lazy" onclick="openImageViewer('${escapeHtml(message.content)}')">`;
     } else {
-        // Apply mention highlighting
-        const highlightedContent = highlightMentions(escapeHtml(message.content));
-        contentHTML = `<div class="message-content">${highlightedContent}</div>`;
+        // Apply mention highlighting and emoji replacement
+        let processedContent = escapeHtml(message.content);
+        processedContent = replaceEmojiCodes(processedContent);
+        processedContent = highlightMentions(processedContent);
+        contentHTML = `<div class="message-content">${processedContent}</div>`;
     }
     
     // Reply preview HTML (if message is a reply)
     let replyHTML = '';
     if (hasReply) {
-        // Note: In a full implementation, you'd fetch the replied-to message
-        // For now, we'll show a simple indicator
+        // Try to get the replied-to message from cache
+        const repliedToMessage = messagesCache.get(message.replied_to_message_id?.toString());
+        let replyToName = 'Someone';
+        let replyToContent = '';
+        
+        if (repliedToMessage) {
+            // Get the sender name from the replied message
+            if (repliedToMessage.sender) {
+                replyToName = repliedToMessage.sender.username;
+            } else if (repliedToMessage.sender_id === currentUser.id) {
+                replyToName = 'You';
+            } else if (currentChat && currentChat.type === 'dm' && currentChat.user) {
+                replyToName = currentChat.user.username;
+            }
+            
+            // Get preview of replied message content
+            if (repliedToMessage.type === 'image') {
+                replyToContent = '📷 Image';
+            } else {
+                replyToContent = repliedToMessage.content.substring(0, 50);
+                if (repliedToMessage.content.length > 50) replyToContent += '...';
+            }
+        }
+        
         replyHTML = `
             <div class="message-reply-preview">
                 <div class="reply-indicator"></div>
-                <div class="reply-text">Replying to a message</div>
+                <div class="reply-content">
+                    <div class="reply-to-name">Replying to ${escapeHtml(replyToName)}</div>
+                    ${replyToContent ? `<div class="reply-text">${escapeHtml(replyToContent)}</div>` : ''}
+                </div>
             </div>
         `;
+    }
+
+    // Sender name HTML - show for received messages (both DM and group)
+    let senderHTML = '';
+    if (received && senderName) {
+        senderHTML = `<div class="message-sender">${escapeHtml(senderName)}</div>`;
     }
 
     return `
@@ -1532,6 +1669,7 @@ function createMessageHTML(message, received) {
              ontouchstart="handleLongPressStart(event, ${message.id}, ${!received})"
              ontouchend="handleLongPressEnd()"
              ontouchmove="handleLongPressEnd()">
+            ${senderHTML}
             <div class="message-bubble">
                 ${replyHTML}
                 ${contentHTML}
@@ -2645,3 +2783,144 @@ window.addMemberToGroup = addMemberToGroup;
 window.removeMemberFromGroup = removeMemberFromGroup;
 window.deleteGroup = deleteGroup;
 
+// Emoji Functions
+function replaceEmojiCodes(text) {
+    // Replace :emoji_name: with actual emoji
+    return text.replace(/:([a-z0-9_]+):/gi, (match, emojiName) => {
+        const emoji = emojiMap[emojiName.toLowerCase()];
+        return emoji || match;
+    });
+}
+
+function handleEmojiAutocomplete(e) {
+    const input = e.target;
+    const text = input.value;
+    const cursorPos = input.selectionStart;
+    
+    // Find if there's a : before cursor
+    const textBeforeCursor = text.substring(0, cursorPos);
+    const lastColonIndex = textBeforeCursor.lastIndexOf(':');
+    
+    // Check if we're in an emoji search (: followed by characters, no space)
+    if (lastColonIndex !== -1) {
+        const textAfterColon = textBeforeCursor.substring(lastColonIndex + 1);
+        
+        // Only show autocomplete if there's no space after the colon
+        if (!textAfterColon.includes(' ')) {
+            const searchTerm = textAfterColon.toLowerCase();
+            
+            // Filter emojis
+            const matches = Object.keys(emojiMap)
+                .filter(name => name.toLowerCase().startsWith(searchTerm))
+                .slice(0, 10); // Limit to 10 results
+            
+            if (matches.length > 0) {
+                showEmojiAutocomplete(matches, input, lastColonIndex);
+                return;
+            }
+        }
+    }
+    
+    // Hide autocomplete if no matches
+    hideEmojiAutocomplete();
+}
+
+function handleEmojiKeydown(e) {
+    if (!emojiAutocomplete || !emojiAutocomplete.element) return;
+    
+    const items = emojiAutocomplete.element.querySelectorAll('.emoji-autocomplete-item');
+    
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        emojiAutocomplete.selectedIndex = Math.min(emojiAutocomplete.selectedIndex + 1, items.length - 1);
+        updateEmojiSelection(items);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        emojiAutocomplete.selectedIndex = Math.max(emojiAutocomplete.selectedIndex - 1, 0);
+        updateEmojiSelection(items);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+        if (emojiAutocomplete.selectedIndex >= 0) {
+            e.preventDefault();
+            selectEmoji(items[emojiAutocomplete.selectedIndex].dataset.emojiName);
+        }
+    } else if (e.key === 'Escape') {
+        hideEmojiAutocomplete();
+    }
+}
+
+function showEmojiAutocomplete(matches, input, colonIndex) {
+    // Remove existing autocomplete
+    hideEmojiAutocomplete();
+    
+    // Create autocomplete element
+    const autocomplete = document.createElement('div');
+    autocomplete.className = 'emoji-autocomplete';
+    
+    matches.forEach((emojiName, index) => {
+        const item = document.createElement('div');
+        item.className = 'emoji-autocomplete-item';
+        if (index === 0) item.classList.add('selected');
+        item.dataset.emojiName = emojiName;
+        
+        const emoji = emojiMap[emojiName];
+        item.innerHTML = `
+            <span class="emoji-icon">${emoji}</span>
+            <span class="emoji-name">:${emojiName}:</span>
+        `;
+        
+        item.addEventListener('click', () => selectEmoji(emojiName));
+        autocomplete.appendChild(item);
+    });
+    
+    // Position autocomplete above input
+    const inputContainer = document.querySelector('.message-input-wrapper');
+    inputContainer.appendChild(autocomplete);
+    
+    emojiAutocomplete = {
+        element: autocomplete,
+        selectedIndex: 0,
+        colonIndex: colonIndex,
+        matches: matches
+    };
+}
+
+function updateEmojiSelection(items) {
+    items.forEach((item, index) => {
+        item.classList.toggle('selected', index === emojiAutocomplete.selectedIndex);
+    });
+    
+    // Scroll into view
+    const selected = items[emojiAutocomplete.selectedIndex];
+    if (selected) {
+        selected.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+function selectEmoji(emojiName) {
+    const input = document.getElementById('message-input');
+    const text = input.value;
+    const cursorPos = input.selectionStart;
+    const emoji = emojiMap[emojiName];
+    
+    if (!emojiAutocomplete || !emoji) return;
+    
+    // Replace :search_term with emoji
+    const beforeColon = text.substring(0, emojiAutocomplete.colonIndex);
+    const afterCursor = text.substring(cursorPos);
+    
+    input.value = beforeColon + emoji + ' ' + afterCursor;
+    
+    // Set cursor position after emoji
+    const newCursorPos = beforeColon.length + emoji.length + 1;
+    input.setSelectionRange(newCursorPos, newCursorPos);
+    
+    hideEmojiAutocomplete();
+    input.focus();
+}
+
+function hideEmojiAutocomplete() {
+    if (emojiAutocomplete && emojiAutocomplete.element) {
+        emojiAutocomplete.element.remove();
+    }
+    emojiAutocomplete = null;
+}
