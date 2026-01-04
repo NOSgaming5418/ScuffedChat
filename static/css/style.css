@@ -1373,6 +1373,20 @@ body {
     color: var(--text-primary);
     font-family: inherit;
     font-size: 0.95rem;
+    /* Enable emoji rendering on mobile */
+    font-variant-emoji: normal;
+    -webkit-font-smoothing: antialiased;
+    /* Prevent zoom on iOS for smaller font-size */
+    font-size: 16px;
+}
+
+/* Mobile-specific emoji optimizations */
+@media (max-width: 768px) {
+    #message-input {
+        font-size: 16px;
+        /* Ensures emoji keyboard works properly */
+        letter-spacing: 0;
+    }
 }
 
 #message-input::placeholder {
@@ -2365,6 +2379,9 @@ body {
     z-index: 1000;
     min-width: 220px;
     animation: slideUp 0.2s ease-out;
+    /* Mobile optimizations */
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 @keyframes slideUp {
@@ -2386,6 +2403,13 @@ body {
     cursor: pointer;
     transition: var(--transition-fast);
     border-bottom: 1px solid var(--border-color);
+    /* Mobile touch optimization */
+    -webkit-tap-highlight-color: transparent;
+    min-height: 44px; /* Touch target minimum */
+    /* Make it clear items are clickable */
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
 }
 
 .emoji-autocomplete-item:last-child {
@@ -2397,12 +2421,28 @@ body {
     background: var(--bg-input-focus);
 }
 
+/* Visual feedback when clicking/tapping */
+.emoji-autocomplete-item.active,
+.emoji-autocomplete-item:active {
+    background: var(--primary-glow);
+    transform: scale(0.98);
+}
+
+/* Pointer events for precise feedback */
+@supports (pointer-events: auto) {
+    .emoji-autocomplete-item {
+        pointer-events: auto;
+    }
+}
+
 .emoji-icon {
     font-size: 1.3rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
+    min-width: 32px;
+    /* Ensure emojis render clearly on mobile */
+    line-height: 1.2;
 }
 
 .emoji-name {
@@ -2414,6 +2454,28 @@ body {
 .emoji-autocomplete-item.selected .emoji-name {
     color: var(--primary);
     font-weight: 600;
+}
+
+/* Mobile-specific emoji autocomplete adjustments */
+@media (max-width: 480px) {
+    .emoji-autocomplete {
+        min-width: 180px;
+        max-height: 160px;
+    }
+    
+    .emoji-autocomplete-item {
+        padding: 8px 12px;
+        min-height: 40px;
+    }
+    
+    .emoji-icon {
+        font-size: 1.2rem;
+        min-width: 28px;
+    }
+    
+    .emoji-name {
+        font-size: 0.8rem;
+    }
 }
 
 .btn-danger {

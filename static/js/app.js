@@ -846,6 +846,9 @@ function setupEventListeners() {
     // Emoji autocomplete on input
     document.getElementById('message-input').addEventListener('input', handleEmojiAutocomplete);
     document.getElementById('message-input').addEventListener('keydown', handleEmojiKeydown);
+    
+    // Handle paste events for emoji support on mobile
+    document.getElementById('message-input').addEventListener('paste', handleEmojiPaste);
 
     // Context menu for messages
     document.addEventListener('click', () => {
@@ -2825,6 +2828,18 @@ function handleEmojiAutocomplete(e) {
     hideEmojiAutocomplete();
 }
 
+// Handle paste events to support pasted emojis from mobile keyboards
+function handleEmojiPaste(e) {
+    const input = e.target;
+    if (!input) return;
+    
+    // Allow paste to work naturally - browser will insert emojis correctly
+    setTimeout(() => {
+        // Ensure emoji autocomplete is hidden when pasting
+        hideEmojiAutocomplete();
+    }, 0);
+}
+
 function handleEmojiKeydown(e) {
     if (!emojiAutocomplete || !emojiAutocomplete.element) return;
     
@@ -2868,7 +2883,34 @@ function showEmojiAutocomplete(matches, input, colonIndex) {
             <span class="emoji-name">:${emojiName}:</span>
         `;
         
-        item.addEventListener('click', () => selectEmoji(emojiName));
+        // Click/tap handler for desktop and mobile
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectEmoji(emojiName);
+        });
+        
+        // Touch handler for better mobile response
+        item.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectEmoji(emojiName);
+        });
+        
+        // Pointer event for better cross-device support
+        item.addEventListener('pointerdown', (e) => {
+            item.classList.add('active');
+        });
+        
+        item.addEventListener('pointerup', (e) => {
+            item.classList.remove('active');
+        });
+        
+        // Prevent context menu on long press
+        item.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+        
         autocomplete.appendChild(item);
     });
     
@@ -2914,6 +2956,10 @@ function selectEmoji(emojiName) {
     const newCursorPos = beforeColon.length + emoji.length + 1;
     input.setSelectionRange(newCursorPos, newCursorPos);
     
+    // Trigger input event to notify other listeners
+    const inputEvent = new Event('input', { bubbles: true });
+    input.dispatchEvent(inputEvent);
+    
     hideEmojiAutocomplete();
     input.focus();
 }
@@ -2924,3 +2970,16 @@ function hideEmojiAutocomplete() {
     }
     emojiAutocomplete = null;
 }
+
+// Mobile Emoji Support
+// ====================
+// Mobile users can use emojis in three ways:
+// 1. Direct emoji keyboard input (native emoji keyboard on iOS/Android)
+// 2. Colon syntax: type :smile: and press Enter or Tab to autocomplete
+// 3. Paste from clipboard: copy emojis from other apps and paste them
+// 
+// The app is optimized for mobile with:
+// - inputmode="text" for proper mobile keyboard handling
+// - font-size 16px to prevent iOS auto-zoom
+// - Paste event support for emoji insertion
+// - Emoji autocomplete with arrow key navigation
