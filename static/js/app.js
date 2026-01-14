@@ -102,7 +102,7 @@ const NotificationManager = {
                 console.warn('AudioContext not supported:', e);
             }
         }
-        
+
         // Also create HTML5 Audio element for mobile fallback
         if (!this.audioElement) {
             this.audioElement = new Audio(this.soundPath);
@@ -116,25 +116,25 @@ const NotificationManager = {
     // Keep audio context alive on iOS with silent audio loop
     startSilentLoop() {
         if (!this.audioContext || this.isKeepingAlive) return;
-        
+
         try {
             // Create a very quiet oscillator that loops forever
             // This keeps the audio context active on iOS
             const oscillator = this.audioContext.createOscillator();
             const gainNode = this.audioContext.createGain();
-            
+
             // Set to essentially silent (0.0001 is very quiet)
             gainNode.gain.value = 0.0001;
-            
+
             oscillator.connect(gainNode);
             gainNode.connect(this.audioContext.destination);
-            
+
             oscillator.frequency.value = 20; // Very low frequency, nearly inaudible
             oscillator.start();
-            
+
             this.silentLoopNode = oscillator;
             this.isKeepingAlive = true;
-            
+
             console.log('🔊 iOS background audio mode enabled - audio context will stay alive');
         } catch (e) {
             console.warn('Could not start silent loop:', e);
@@ -469,10 +469,10 @@ function setupWebSocket() {
 
     // Connect WebSocket with user ID for authentication
     window.wsClient.connect(currentUser?.id || null);
-    
+
     // Start heartbeat to update last_seen (for online status)
     startOnlineStatusHeartbeat();
-    
+
     // When connected, load online friends status
     window.wsClient.on('connected', async () => {
         console.log('WebSocket connected, updating online status');
@@ -506,7 +506,7 @@ function setupWebSocket() {
 // Update last_seen timestamp in database (heartbeat)
 async function updateLastSeen() {
     if (!currentUser) return;
-    
+
     try {
         await window.supabaseClient
             .from('profiles')
@@ -521,10 +521,10 @@ async function updateLastSeen() {
 function startOnlineStatusHeartbeat() {
     // Update immediately
     updateLastSeen();
-    
+
     // Update every 15 seconds for faster online status detection
     setInterval(updateLastSeen, 15000);
-    
+
     // Update when page becomes visible (tab switching)
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
@@ -536,21 +536,21 @@ function startOnlineStatusHeartbeat() {
 // Load online status for friends based on last_seen
 async function loadOnlineStatus() {
     if (!friends || friends.length === 0) return;
-    
+
     try {
         const friendIds = friends.map(f => f.id);
-        
+
         // Consider users online if last_seen within last 2 minutes
         const onlineThreshold = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-        
+
         const { data, error } = await window.supabaseClient
             .from('profiles')
             .select('id, last_seen')
             .in('id', friendIds)
             .gte('last_seen', onlineThreshold);
-        
+
         if (error) throw error;
-        
+
         // Update onlineUsers map
         onlineUsers.clear();
         if (data) {
@@ -558,17 +558,17 @@ async function loadOnlineStatus() {
                 onlineUsers.set(profile.id, true);
             });
         }
-        
+
         // Update UI
         renderFriends();
         renderConversations();
-        
+
         // Update chat if viewing someone
         if (currentChat && currentChat.type === 'dm') {
             const isOnline = onlineUsers.has(currentChat.id);
             updateChatOnlineStatus(isOnline);
         }
-        
+
     } catch (error) {
         console.error('Failed to load online status:', error);
     }
@@ -636,11 +636,11 @@ function setupRealtimeSubscription() {
                         .select('*')
                         .eq('id', message.sender_id)
                         .single();
-                    
+
                     if (sender) {
                         message.sender = sender;
                     }
-                    
+
                     appendMessage(message, true);
                 }
 
@@ -710,27 +710,27 @@ function setupRealtimeSubscription() {
             { event: 'UPDATE', schema: 'public', table: 'profiles' },
             (payload) => {
                 const profile = payload.new;
-                
+
                 // Only care about friends' status changes
                 const isFriend = friends.some(f => f.id === profile.id);
                 if (!isFriend) return;
-                
+
                 // Check if user is online (last_seen within 2 minutes)
                 const onlineThreshold = new Date(Date.now() - 2 * 60 * 1000);
                 const lastSeen = new Date(profile.last_seen);
                 const isOnline = lastSeen > onlineThreshold;
-                
+
                 // Update online status
                 if (isOnline) {
                     onlineUsers.set(profile.id, true);
                 } else {
                     onlineUsers.delete(profile.id);
                 }
-                
+
                 // Update UI
                 renderFriends();
                 renderConversations();
-                
+
                 // Update chat header if viewing this user
                 if (currentChat && currentChat.type === 'dm' && currentChat.id === profile.id) {
                     updateChatOnlineStatus(isOnline);
@@ -846,7 +846,7 @@ function setupEventListeners() {
     // Emoji autocomplete on input
     document.getElementById('message-input').addEventListener('input', handleEmojiAutocomplete);
     document.getElementById('message-input').addEventListener('keydown', handleEmojiKeydown);
-    
+
     // Handle paste events for emoji support on mobile
     document.getElementById('message-input').addEventListener('paste', handleEmojiPaste);
 
@@ -861,11 +861,12 @@ function setupEventListeners() {
 
 async function loadConversations() {
     try {
-        // Get messages where user is sender or receiver
+        // Get DM messages where user is sender or receiver (exclude group messages)
         const { data: messages, error } = await window.supabaseClient
             .from('messages')
             .select('*, sender:profiles!messages_sender_id_fkey(*), receiver:profiles!messages_receiver_id_fkey(*)')
             .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+            .is('group_id', null)  // Exclude group messages - only DMs have null group_id
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -873,8 +874,14 @@ async function loadConversations() {
         // Group by conversation partner
         const convMap = new Map();
         for (const msg of messages || []) {
+            // Skip if no valid partner (shouldn't happen with group_id filter, but safety check)
+            if (!msg.receiver_id) continue;
+
             const partnerId = msg.sender_id === currentUser.id ? msg.receiver_id : msg.sender_id;
             const partner = msg.sender_id === currentUser.id ? msg.receiver : msg.sender;
+
+            // Skip if partner is null/undefined
+            if (!partner) continue;
 
             if (!convMap.has(partnerId)) {
                 convMap.set(partnerId, {
@@ -898,6 +905,7 @@ async function loadConversations() {
     }
 }
 
+
 async function loadGroups() {
     try {
         const { data, error } = await window.supabaseClient
@@ -909,15 +917,29 @@ async function loadGroups() {
 
         groups = (data || []).map(entry => entry.group || {});
 
-        // Fetch member count for each group
+        // Fetch member count and last message for each group
         for (let group of groups) {
+            // Get member count
             const { count, error: countError } = await window.supabaseClient
                 .from('group_members')
                 .select('*', { count: 'exact', head: true })
                 .eq('group_id', group.id);
-            
+
             if (!countError) {
                 group.member_count = count || 0;
+            }
+
+            // Get last message for this group
+            const { data: lastMessageData, error: msgError } = await window.supabaseClient
+                .from('messages')
+                .select('*, sender:profiles!messages_sender_id_fkey(*)')
+                .eq('group_id', group.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single();
+
+            if (!msgError && lastMessageData) {
+                group.last_message = lastMessageData;
             }
         }
 
@@ -926,6 +948,7 @@ async function loadGroups() {
         console.error('Failed to load groups:', error);
     }
 }
+
 
 async function loadFriends() {
     try {
@@ -1076,7 +1099,7 @@ async function sendMessage() {
 
         appendMessage(message, false);
         input.value = '';
-        
+
         // Clear reply context
         clearReplyContext();
 
@@ -1620,7 +1643,7 @@ function createMessageHTML(message, received) {
         processedContent = highlightMentions(processedContent);
         contentHTML = `<div class="message-content">${processedContent}</div>`;
     }
-    
+
     // Reply preview HTML (if message is a reply)
     let replyHTML = '';
     if (hasReply) {
@@ -1628,7 +1651,7 @@ function createMessageHTML(message, received) {
         const repliedToMessage = messagesCache.get(message.replied_to_message_id?.toString());
         let replyToName = 'Someone';
         let replyToContent = '';
-        
+
         if (repliedToMessage) {
             // Get the sender name from the replied message
             if (repliedToMessage.sender) {
@@ -1638,7 +1661,7 @@ function createMessageHTML(message, received) {
             } else if (currentChat && currentChat.type === 'dm' && currentChat.user) {
                 replyToName = currentChat.user.username;
             }
-            
+
             // Get preview of replied message content
             if (repliedToMessage.type === 'image') {
                 replyToContent = '📷 Image';
@@ -1647,7 +1670,7 @@ function createMessageHTML(message, received) {
                 if (repliedToMessage.content.length > 50) replyToContent += '...';
             }
         }
-        
+
         replyHTML = `
             <div class="message-reply-preview">
                 <div class="reply-indicator"></div>
@@ -1887,7 +1910,7 @@ function showMessageContextMenu(event, messageId, isSentByMe) {
         replyToMessage(messageId);
         menu.style.display = 'none';
     };
-    
+
     // Only show edit/delete for own messages
     if (isSentByMe) {
         deleteBtn.style.display = 'flex';
@@ -2219,7 +2242,7 @@ function openProfileModal() {
         console.warn('Profile modal not found');
         return;
     }
-    
+
     // Setup save handler if not already done
     const saveBtn = document.getElementById('save-profile-btn');
     if (saveBtn && !saveBtn.hasAttribute('data-handler-set')) {
@@ -2345,14 +2368,14 @@ function replyToMessage(messageId) {
     let content = '';
     let sender = 'Unknown';
     let type = 'text';
-    
+
     // Get sender name
     if (message.sender && message.sender.username) {
         sender = message.sender.username;
     } else if (message.sender_id === currentUser.id) {
         sender = 'You';
     }
-    
+
     // Get content
     if (message.type === 'image') {
         content = '[Image]';
@@ -2361,23 +2384,23 @@ function replyToMessage(messageId) {
         content = message.content || '';
         type = 'text';
     }
-    
+
     replyingToMessage = {
         id: messageId,
         sender: sender,
         content: content.substring(0, 50), // Truncate to 50 chars
         type: type
     };
-    
+
     showReplyPreview();
-    
+
     // Focus input
     document.getElementById('message-input').focus();
 }
 
 function showReplyPreview() {
     if (!replyingToMessage) return;
-    
+
     let previewHtml = `
         <div class=\"reply-preview\" id=\"reply-preview\">
             <div class=\"reply-preview-content\">
@@ -2392,14 +2415,14 @@ function showReplyPreview() {
             </button>
         </div>
     `;
-    
+
     // Add to input container
     const inputContainer = document.querySelector('.message-input-wrapper');
     const existingPreview = document.getElementById('reply-preview');
     if (existingPreview) {
         existingPreview.remove();
     }
-    
+
     inputContainer.insertAdjacentHTML('beforebegin', previewHtml);
 }
 
@@ -2423,13 +2446,13 @@ function extractMentions(text) {
     const mentionPattern = /@([a-zA-Z0-9_]+)/g;
     const matches = text.matchAll(mentionPattern);
     const mentionedUsernames = [];
-    
+
     for (const match of matches) {
         mentionedUsernames.push(match[1]);
     }
-    
+
     if (mentionedUsernames.length === 0) return [];
-    
+
     // Get member IDs (for now return empty, will be populated by backend or separate lookup)
     // In a full implementation, you'd look up these usernames and get their IDs
     return []; // Placeholder - implement username to ID lookup if needed
@@ -2447,25 +2470,25 @@ function highlightMentions(text) {
 async function openGroupSettings(groupId) {
     const group = groups.find(g => `${g.id}` === `${groupId}`);
     if (!group) return;
-    
+
     // Load group members
     try {
         const { data: memberData, error } = await window.supabaseClient
             .from('group_members')
             .select('member_id')
             .eq('group_id', groupId);
-        
+
         if (error) throw error;
-        
+
         // Fetch profile info for each member
         const memberIds = memberData.map(m => m.member_id);
         const { data: profiles, error: profileError } = await window.supabaseClient
             .from('profiles')
             .select('*')
             .in('id', memberIds);
-        
+
         if (profileError) throw profileError;
-        
+
         showGroupSettingsModal(group, profiles || []);
     } catch (error) {
         console.error('Failed to load group members:', error);
@@ -2479,11 +2502,11 @@ function showGroupSettingsModal(group, members) {
         console.error('Group settings modal not found');
         return;
     }
-    
+
     // Populate modal
     document.getElementById('group-settings-name').value = group.name;
     document.getElementById('current-group-id').value = group.id;
-    
+
     // Display current group avatar
     const avatarElement = document.getElementById('current-group-avatar');
     if (group.avatar) {
@@ -2491,11 +2514,11 @@ function showGroupSettingsModal(group, members) {
     } else {
         avatarElement.innerHTML = `<span>${escapeHtml(group.name.charAt(0).toUpperCase())}</span>`;
     }
-    
+
     // Reset file input
     const fileInput = document.getElementById('group-avatar-upload');
     fileInput.value = '';
-    
+
     // Add preview when file is selected
     fileInput.onchange = (e) => {
         const file = e.target.files[0];
@@ -2507,16 +2530,16 @@ function showGroupSettingsModal(group, members) {
             reader.readAsDataURL(file);
         }
     };
-    
+
     // Render members list
     const membersList = document.getElementById('group-members-list');
     membersList.innerHTML = members.map(member => `
         <div class=\"group-member-item\">
             <div class=\"member-avatar\">
                 ${member.avatar ?
-                    `<img src="${member.avatar}" alt="${escapeHtml(member.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
-                    `<span>${member.username.charAt(0).toUpperCase()}</span>`
-                }
+            `<img src="${member.avatar}" alt="${escapeHtml(member.username)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">` :
+            `<span>${member.username.charAt(0).toUpperCase()}</span>`
+        }
             </div>
             <span class=\"member-username\">${escapeHtml(member.username)}</span>
             ${member.id !== group.creator_id && member.id !== currentUser.id ? `
@@ -2525,7 +2548,7 @@ function showGroupSettingsModal(group, members) {
             ${member.id === group.creator_id ? '<span class=\"member-badge\">Creator</span>' : ''}
         </div>
     `).join('');
-    
+
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 }
@@ -2541,36 +2564,36 @@ function closeGroupSettingsModal() {
 async function updateGroupName() {
     const groupId = document.getElementById('current-group-id').value;
     const newName = document.getElementById('group-settings-name').value.trim();
-    
+
     if (!newName || newName.length < 1 || newName.length > 100) {
         showToast('Group name must be 1-100 characters', 'error');
         return;
     }
-    
+
     try {
         const { error } = await window.supabaseClient
             .from('group_chats')
             .update({ name: newName, updated_at: new Date().toISOString() })
             .eq('id', groupId)
             .eq('creator_id', currentUser.id); // Only creator can rename
-        
+
         if (error) throw error;
-        
+
         // Update local groups array
         const group = groups.find(g => `${g.id}` === `${groupId}`);
         if (group) {
             group.name = newName;
         }
-        
+
         // Update UI
         renderGroups();
-        
+
         // Update UI
         renderGroups();
         if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
             document.getElementById('chat-username').textContent = newName;
         }
-        
+
         showToast('Group name updated', 'success');
         closeGroupSettingsModal();
     } catch (error) {
@@ -2582,67 +2605,67 @@ async function updateGroupName() {
 async function updateGroupAvatar() {
     const groupId = document.getElementById('current-group-id').value;
     const fileInput = document.getElementById('group-avatar-upload');
-    
+
     if (!fileInput.files || fileInput.files.length === 0) {
         showToast('Please select an image first', 'error');
         return;
     }
-    
+
     const file = fileInput.files[0];
-    
+
     // Validate file size (5MB max)
     if (file.size > 5 * 1024 * 1024) {
         showToast('Image must be less than 5MB', 'error');
         return;
     }
-    
+
     // Validate file type
     if (!file.type.startsWith('image/')) {
         showToast('Please upload an image file', 'error');
         return;
     }
-    
+
     try {
         // Upload to Supabase storage
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}.${fileExt}`;
         const filePath = `groups/${groupId}/${fileName}`;
-        
+
         const { data: uploadData, error: uploadError } = await window.supabaseClient.storage
             .from('avatars')
             .upload(filePath, file, {
                 cacheControl: '3600',
                 upsert: true
             });
-        
+
         if (uploadError) throw uploadError;
-        
+
         // Get public URL
         const { data: urlData } = window.supabaseClient.storage
             .from('avatars')
             .getPublicUrl(filePath);
-        
+
         const avatarUrl = urlData.publicUrl;
-        
+
         // Update group in database
         const { error } = await window.supabaseClient
             .from('group_chats')
             .update({ avatar: avatarUrl, updated_at: new Date().toISOString() })
             .eq('id', groupId)
             .eq('creator_id', currentUser.id); // Only creator can update avatar
-        
+
         if (error) throw error;
-        
+
         // Update local groups array
         const group = groups.find(g => `${g.id}` === `${groupId}`);
         if (group) {
             group.avatar = avatarUrl;
         }
-        
+
         // Update modal preview
         const avatarElement = document.getElementById('current-group-avatar');
         avatarElement.innerHTML = `<img src="${avatarUrl}" alt="Group" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
-        
+
         // Update UI
         renderGroups();
         if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
@@ -2651,7 +2674,7 @@ async function updateGroupAvatar() {
                 chatAvatar.innerHTML = `<img src="${avatarUrl}" alt="Group" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`;
             }
         }
-        
+
         showToast('Group avatar updated successfully', 'success');
         fileInput.value = ''; // Reset file input
     } catch (error) {
@@ -2663,9 +2686,9 @@ async function updateGroupAvatar() {
 async function addMemberToGroup() {
     const groupId = document.getElementById('current-group-id').value;
     const username = document.getElementById('add-member-input').value.trim();
-    
+
     if (!username) return;
-    
+
     try {
         // Find user by username
         const { data: user, error: findError } = await window.supabaseClient
@@ -2673,12 +2696,12 @@ async function addMemberToGroup() {
             .select('*')
             .eq('username', username)
             .single();
-        
+
         if (findError || !user) {
             showToast('User not found', 'error');
             return;
         }
-        
+
         // Check if already a member
         const { data: existing } = await window.supabaseClient
             .from('group_members')
@@ -2686,12 +2709,12 @@ async function addMemberToGroup() {
             .eq('group_id', groupId)
             .eq('member_id', user.id)
             .single();
-        
+
         if (existing) {
             showToast('User is already a member', 'error');
             return;
         }
-        
+
         // Add member
         const { error: insertError } = await window.supabaseClient
             .from('group_members')
@@ -2700,16 +2723,16 @@ async function addMemberToGroup() {
                 member_id: user.id,
                 joined_at: new Date().toISOString()
             });
-        
+
         if (insertError) throw insertError;
-        
+
         showToast('Member added', 'success');
         document.getElementById('add-member-input').value = '';
-        
+
         // Reload modal
         closeGroupSettingsModal();
         setTimeout(() => openGroupSettings(groupId), 300);
-        
+
     } catch (error) {
         console.error('Failed to add member:', error);
         if (error.message && error.message.includes('violates row-level security')) {
@@ -2722,22 +2745,22 @@ async function addMemberToGroup() {
 
 async function removeMemberFromGroup(groupId, memberId) {
     if (!confirm('Remove this member from the group?')) return;
-    
+
     try {
         const { error } = await window.supabaseClient
             .from('group_members')
             .delete()
             .eq('group_id', groupId)
             .eq('member_id', memberId);
-        
+
         if (error) throw error;
-        
+
         showToast('Member removed', 'success');
-        
+
         // Reload modal
         closeGroupSettingsModal();
         setTimeout(() => openGroupSettings(groupId), 300);
-        
+
     } catch (error) {
         console.error('Failed to remove member:', error);
         showToast('Failed to remove member', 'error');
@@ -2746,9 +2769,9 @@ async function removeMemberFromGroup(groupId, memberId) {
 
 async function deleteGroup() {
     const groupId = document.getElementById('current-group-id').value;
-    
+
     if (!confirm('Are you sure you want to delete this group? This cannot be undone.')) return;
-    
+
     try {
         // Delete group (cascade will handle members and messages)
         const { error } = await window.supabaseClient
@@ -2756,23 +2779,23 @@ async function deleteGroup() {
             .delete()
             .eq('id', groupId)
             .eq('creator_id', currentUser.id); // Only creator can delete
-        
+
         if (error) throw error;
-        
+
         // Remove from local array
         groups = groups.filter(g => `${g.id}` !== `${groupId}`);
         renderGroups();
-        
+
         // Close chat if currently open
-        
+
         // Close chat if currently open
         if (currentChat && currentChat.type === 'group' && `${currentChat.id}` === `${groupId}`) {
             document.getElementById('btn-back').click();
         }
-        
+
         showToast('Group deleted', 'success');
         closeGroupSettingsModal();
-        
+
     } catch (error) {
         console.error('Failed to delete group:', error);
         showToast('Failed to delete group', 'error');
@@ -2799,31 +2822,31 @@ function handleEmojiAutocomplete(e) {
     const input = e.target;
     const text = input.value;
     const cursorPos = input.selectionStart;
-    
+
     // Find if there's a : before cursor
     const textBeforeCursor = text.substring(0, cursorPos);
     const lastColonIndex = textBeforeCursor.lastIndexOf(':');
-    
+
     // Check if we're in an emoji search (: followed by characters, no space)
     if (lastColonIndex !== -1) {
         const textAfterColon = textBeforeCursor.substring(lastColonIndex + 1);
-        
+
         // Only show autocomplete if there's no space after the colon
         if (!textAfterColon.includes(' ')) {
             const searchTerm = textAfterColon.toLowerCase();
-            
+
             // Filter emojis
             const matches = Object.keys(emojiMap)
                 .filter(name => name.toLowerCase().startsWith(searchTerm))
                 .slice(0, 10); // Limit to 10 results
-            
+
             if (matches.length > 0) {
                 showEmojiAutocomplete(matches, input, lastColonIndex);
                 return;
             }
         }
     }
-    
+
     // Hide autocomplete if no matches
     hideEmojiAutocomplete();
 }
@@ -2832,7 +2855,7 @@ function handleEmojiAutocomplete(e) {
 function handleEmojiPaste(e) {
     const input = e.target;
     if (!input) return;
-    
+
     // Allow paste to work naturally - browser will insert emojis correctly
     setTimeout(() => {
         // Ensure emoji autocomplete is hidden when pasting
@@ -2842,9 +2865,9 @@ function handleEmojiPaste(e) {
 
 function handleEmojiKeydown(e) {
     if (!emojiAutocomplete || !emojiAutocomplete.element) return;
-    
+
     const items = emojiAutocomplete.element.querySelectorAll('.emoji-autocomplete-item');
-    
+
     if (e.key === 'ArrowDown') {
         e.preventDefault();
         emojiAutocomplete.selectedIndex = Math.min(emojiAutocomplete.selectedIndex + 1, items.length - 1);
@@ -2866,58 +2889,58 @@ function handleEmojiKeydown(e) {
 function showEmojiAutocomplete(matches, input, colonIndex) {
     // Remove existing autocomplete
     hideEmojiAutocomplete();
-    
+
     // Create autocomplete element
     const autocomplete = document.createElement('div');
     autocomplete.className = 'emoji-autocomplete';
-    
+
     matches.forEach((emojiName, index) => {
         const item = document.createElement('div');
         item.className = 'emoji-autocomplete-item';
         if (index === 0) item.classList.add('selected');
         item.dataset.emojiName = emojiName;
-        
+
         const emoji = emojiMap[emojiName];
         item.innerHTML = `
             <span class="emoji-icon">${emoji}</span>
             <span class="emoji-name">:${emojiName}:</span>
         `;
-        
+
         // Click/tap handler for desktop and mobile
         item.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             selectEmoji(emojiName);
         });
-        
+
         // Touch handler for better mobile response
         item.addEventListener('touchend', (e) => {
             e.preventDefault();
             e.stopPropagation();
             selectEmoji(emojiName);
         });
-        
+
         // Pointer event for better cross-device support
         item.addEventListener('pointerdown', (e) => {
             item.classList.add('active');
         });
-        
+
         item.addEventListener('pointerup', (e) => {
             item.classList.remove('active');
         });
-        
+
         // Prevent context menu on long press
         item.addEventListener('contextmenu', (e) => {
             e.preventDefault();
         });
-        
+
         autocomplete.appendChild(item);
     });
-    
+
     // Position autocomplete above input
     const inputContainer = document.querySelector('.message-input-wrapper');
     inputContainer.appendChild(autocomplete);
-    
+
     emojiAutocomplete = {
         element: autocomplete,
         selectedIndex: 0,
@@ -2930,7 +2953,7 @@ function updateEmojiSelection(items) {
     items.forEach((item, index) => {
         item.classList.toggle('selected', index === emojiAutocomplete.selectedIndex);
     });
-    
+
     // Scroll into view
     const selected = items[emojiAutocomplete.selectedIndex];
     if (selected) {
@@ -2943,23 +2966,23 @@ function selectEmoji(emojiName) {
     const text = input.value;
     const cursorPos = input.selectionStart;
     const emoji = emojiMap[emojiName];
-    
+
     if (!emojiAutocomplete || !emoji) return;
-    
+
     // Replace :search_term with emoji
     const beforeColon = text.substring(0, emojiAutocomplete.colonIndex);
     const afterCursor = text.substring(cursorPos);
-    
+
     input.value = beforeColon + emoji + ' ' + afterCursor;
-    
+
     // Set cursor position after emoji
     const newCursorPos = beforeColon.length + emoji.length + 1;
     input.setSelectionRange(newCursorPos, newCursorPos);
-    
+
     // Trigger input event to notify other listeners
     const inputEvent = new Event('input', { bubbles: true });
     input.dispatchEvent(inputEvent);
-    
+
     hideEmojiAutocomplete();
     input.focus();
 }
@@ -2977,7 +3000,7 @@ function hideEmojiAutocomplete() {
 // 1. Direct emoji keyboard input (native emoji keyboard on iOS/Android)
 // 2. Colon syntax: type :smile: and press Enter or Tab to autocomplete
 // 3. Paste from clipboard: copy emojis from other apps and paste them
-// 
+//
 // The app is optimized for mobile with:
 // - inputmode="text" for proper mobile keyboard handling
 // - font-size 16px to prevent iOS auto-zoom
